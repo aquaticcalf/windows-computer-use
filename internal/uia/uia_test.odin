@@ -1,8 +1,8 @@
 package uia
 
-import "core:testing"
-import windows "core:sys/windows"
 import "../win32"
+import windows "core:sys/windows"
+import "core:testing"
 
 // Runs as one serialized test: the Odin test runner would otherwise run
 // separate @(test) procs on parallel threads, which can race COM/UIA state.

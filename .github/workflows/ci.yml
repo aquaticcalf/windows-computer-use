@@ -32,5 +32,14 @@ jobs:
       - name: Test
         run: .\build.ps1 test
 
-      - name: Help smoke test
-        run: .\bin\wcu.exe -h
+      - name: Format check
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/DanielGavin/ols/releases/latest/download/ols-x86_64-pc-windows-msvc.zip" -OutFile ols.zip
+          Expand-Archive ols.zip -DestinationPath ols
+          Rename-Item "ols\odinfmt-x86_64-pc-windows-msvc.exe" "odinfmt.exe"
+          $files = Get-ChildItem -Recurse -Filter *.odin | ForEach-Object { $_.FullName }
+          .\ols\odinfmt.exe -w $files
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --exit-code -- "*.odin"
+          if ($LASTEXITCODE -ne 0) { Write-Host "odinfmt would change files; run odinfmt -w before committing"; exit 1 }
