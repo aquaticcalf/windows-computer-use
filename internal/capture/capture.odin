@@ -3,6 +3,16 @@ package capture
 import "core:hash"
 import "core:sys/windows"
 
+foreign import user32 "system:User32.lib"
+
+@(default_calling_convention = "system")
+foreign user32 {
+	// PrintWindow asks the target window to render into the supplied DC.
+	PrintWindow :: proc(hwnd: windows.HWND, dc: windows.HDC, flags: windows.UINT) -> windows.BOOL ---
+}
+
+PW_RENDERFULLCONTENT :: 0x00000002
+
 // capture_window captures a window's rectangle and returns the pixels as a
 // PNG byte slice. The PNG encoder is local and writes stored (uncompressed)
 // deflate blocks, so there is no zlib dependency. The caller deletes the
@@ -54,7 +64,10 @@ capture_window :: proc(
 	previous := windows.SelectObject(mem_dc, windows.HGDIOBJ(section))
 	defer windows.SelectObject(mem_dc, previous)
 
-	if !windows.BitBlt(mem_dc, 0, 0, width, height, dc, 0, 0, windows.SRCCOPY) {
+	// GDI BitBlt returns empty pixels for many GPU-composited windows. Ask the
+	// target to render itself first, then retain BitBlt as a legacy fallback.
+	rendered := PrintWindow(hwnd, mem_dc, PW_RENDERFULLCONTENT)
+	if !rendered && !windows.BitBlt(mem_dc, 0, 0, width, height, dc, 0, 0, windows.SRCCOPY) {
 		return nil, false
 	}
 
