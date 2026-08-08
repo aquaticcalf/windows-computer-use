@@ -20,6 +20,9 @@ limitations. Whenever you implement an issue in a subsystem (perception,
 actions, concurrency, cdp, mcp, isolation, safety), read the matching
 `ARCHITECTURE.md` section first and follow it.
 
+`DESIGN.md` is the module-design doctrine: deep modules, seam placement, and
+testability rules. Read it before designing a new module or moving a seam.
+
 ## The GitHub project board is the plan
 
 All planned and in-flight work lives on the GitHub Project:
