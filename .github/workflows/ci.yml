@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Odin
+        shell: pwsh
+        run: |
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/odin-lang/odin/releases/latest" -Headers @{ "User-Agent" = "wcu-ci" }
+          $asset = $release.assets | Where-Object { $_.name -match "windows.*amd64.*\.zip$" } | Select-Object -First 1
+          if (-not $asset) { throw "no Windows amd64 Odin release asset found" }
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile odin.zip
+          Expand-Archive odin.zip -DestinationPath odin
+
+      - name: Add Odin to PATH
+        shell: pwsh
+        run: |
+          "${{ github.workspace }}\odin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Check
+        run: odin check cmd/wcu
+
+      - name: Build
+        run: odin build cmd/wcu -out:bin/wcu.exe
+
+      - name: Test
+        run: odin test internal/version
+
+      - name: Help smoke test
+        run: .\bin\wcu.exe -h
