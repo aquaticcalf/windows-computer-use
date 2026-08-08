@@ -146,11 +146,14 @@ walk_node :: proc(
 	defer uia.release_element(&child)
 	walk_node(s, &child, depth + 1, limits, built, count, allocator)
 
+	// Walk siblings by advancing the reference; each next_sibling returns the
+	// sibling of the element passed to it.
 	sibling, sok := uia.next_sibling(&s.auto, &child)
 	for sok {
 		walk_node(s, &sibling, depth + 1, limits, built, count, allocator)
+		next, nok := uia.next_sibling(&s.auto, &sibling)
 		uia.release_element(&sibling)
-		sibling, sok = uia.next_sibling(&s.auto, &child)
+		sibling, sok = next, nok
 	}
 }
 
