@@ -1,6 +1,7 @@
 package window
 
 import "../win32"
+import "core:strconv"
 import "core:strings"
 import "core:sys/windows"
 
@@ -64,6 +65,65 @@ find :: proc(windows_: []Window, substring: string) -> (Window, bool) {
 		}
 	}
 	return {}, false
+}
+
+// resolve finds a top-level window for an app query. The query is either a
+// numeric pid or a case-insensitive substring of a window title. Returns nil
+// when nothing matches.
+resolve :: proc(app_query: string, allocator := context.allocator) -> (windows.HWND, bool) {
+	rows, listed := list(allocator)
+	if !listed {
+		return nil, false
+	}
+	defer destroy(rows, allocator)
+
+	if pid, parsed := strconv.parse_u64(app_query, 10); parsed {
+		for w in rows {
+			if u32(pid) == w.pid {
+				return w.handle, true
+			}
+		}
+		return nil, false
+	}
+
+	for w in rows {
+		if contains_ci(w.title, app_query) {
+			return w.handle, true
+		}
+	}
+	return nil, false
+}
+
+// contains_ci reports whether hay contains needle, case-insensitively, for
+// ASCII text.
+contains_ci :: proc(hay, needle: string) -> bool {
+	if len(needle) == 0 {
+		return true
+	}
+	if len(hay) < len(needle) {
+		return false
+	}
+	for i in 0 ..= len(hay) - len(needle) {
+		match := true
+		for j in 0 ..< len(needle) {
+			if to_lower(hay[i + j]) != to_lower(needle[j]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// to_lower lowercases an ASCII byte.
+to_lower :: proc(b: byte) -> byte {
+	if 'A' <= b && b <= 'Z' {
+		return b + ('a' - 'A')
+	}
+	return b
 }
 
 // destroy frees a window list produced by list, including its title strings.

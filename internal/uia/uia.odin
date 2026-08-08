@@ -23,6 +23,8 @@ Error :: enum {
 	Pattern_Not_Available,
 	// Action_Failed reports that a pattern action returned an error.
 	Action_Failed,
+	// Text_Unavailable reports that element text content could not be read.
+	Text_Unavailable,
 }
 
 // Scroll_Amount values passed to scroll.
@@ -339,6 +341,47 @@ toggle :: proc(el: ^Element) -> Error {
 		return .Action_Failed
 	}
 	return .None
+}
+
+// value returns an editable element's current value, or an empty string when
+// the element has no value pattern.
+value :: proc(el: ^Element, allocator := context.allocator) -> (string, Error) {
+	bstr, hr := binding.element_current_value(el.ptr)
+	if hr != 0 || bstr == nil {
+		return "", .None
+	}
+	defer binding.free_bstr(bstr)
+
+	length := bstr_length(bstr)
+	if length == 0 {
+		return "", .None
+	}
+	text, _ := windows.wstring_to_utf8_alloc(windows.wstring(bstr), length, allocator)
+	return text, .None
+}
+
+// text reads up to max_length characters of the element's text content via
+// the Text pattern. The caller deletes the returned string.
+text :: proc(
+	el: ^Element,
+	max_length: i32 = 4096,
+	allocator := context.allocator,
+) -> (
+	string,
+	Error,
+) {
+	bstr, hr := binding.element_text(el.ptr, max_length)
+	if hr != 0 || bstr == nil {
+		return "", .Text_Unavailable
+	}
+	defer binding.free_bstr(bstr)
+
+	length := bstr_length(bstr)
+	if length == 0 {
+		return "", .None
+	}
+	text, _ := windows.wstring_to_utf8_alloc(windows.wstring(bstr), length, allocator)
+	return text, .None
 }
 
 // bstr_length counts the UTF-16 units in a null-terminated BSTR.

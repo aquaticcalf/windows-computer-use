@@ -1,6 +1,7 @@
 package window
 
 import "../win32"
+import "core:fmt"
 import "core:testing"
 
 @(test)
@@ -45,4 +46,32 @@ test_rect_and_foreground_are_callable :: proc(t: ^testing.T) {
 
 	// Foreground can race with the user; just assert it returns without error.
 	_ = force_foreground(shell)
+}
+
+@(test)
+test_resolve_by_title_and_pid :: proc(t: ^testing.T) {
+	shell := win32.GetShellWindow()
+	hwnd, ok := resolve("Program Manager")
+	testing.expect(t, ok)
+	testing.expect(t, hwnd == shell)
+
+	rows, lok := list()
+	testing.expect(t, lok)
+	if lok {
+		defer destroy(rows)
+		if len(rows) > 0 {
+			pid := rows[0].pid
+			by_pid, pok := resolve(fmt.tprintf("%d", pid))
+			testing.expect(t, pok)
+			_ = by_pid
+		}
+	}
+}
+
+@(test)
+test_contains_ci :: proc(t: ^testing.T) {
+	testing.expect(t, contains_ci("Program Manager", "program"))
+	testing.expect(t, contains_ci("Program Manager", "MANAGER"))
+	testing.expect(t, contains_ci("Slack - Workspace", "slack"))
+	testing.expect(t, !contains_ci("abc", "xyz"))
 }

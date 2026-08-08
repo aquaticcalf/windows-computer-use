@@ -643,6 +643,86 @@ TogglePattern_Vtbl :: struct {
 	Toggle:  proc "system" (This: rawptr) -> windows.HRESULT,
 }
 
+// Text_Pattern_Id selects the Text pattern.
+Text_Pattern_Id :: 10014
+
+// TextRange represents a span of text within a Text pattern.
+TextRange :: struct {
+	using _: ^TextRange_Vtbl,
+}
+
+// TextRange_Vtbl matches the IUIAutomationTextRange vtable.
+TextRange_Vtbl :: struct {
+	using _:               IUnknownVtbl,
+	Clone:                 proc "system" (This: rawptr, cloned: ^^TextRange) -> windows.HRESULT,
+	Compare:               proc "system" (
+		This: rawptr,
+		other: ^TextRange,
+		same: ^windows.BOOL,
+	) -> windows.HRESULT,
+	CompareEndpoints:      proc "system" (
+		This: rawptr,
+		endpoint: i32,
+		target: ^TextRange,
+		target_endpoint: i32,
+		result: ^i32,
+	) -> windows.HRESULT,
+	ExpandToEnclosingUnit: proc "system" (This: rawptr, unit: i32) -> windows.HRESULT,
+	FindAttribute:         proc "system" (
+		This: rawptr,
+		attr: i32,
+		value: Variant,
+		backward: windows.BOOL,
+		found: ^^TextRange,
+	) -> windows.HRESULT,
+	FindText:              proc "system" (
+		This: rawptr,
+		text: windows.LPCWSTR,
+		backward: windows.BOOL,
+		ignore_case: windows.BOOL,
+		found: ^^TextRange,
+	) -> windows.HRESULT,
+	GetAttributeValue:     proc "system" (
+		This: rawptr,
+		attr: i32,
+		value: rawptr,
+	) -> windows.HRESULT,
+	GetBoundingRectangles: proc "system" (This: rawptr, rects: ^rawptr) -> windows.HRESULT,
+	GetEnclosingElement:   proc "system" (
+		This: rawptr,
+		element: ^^IUIAutomationElement,
+	) -> windows.HRESULT,
+	GetText:               proc "system" (
+		This: rawptr,
+		max_length: i32,
+		text: ^windows.BSTR,
+	) -> windows.HRESULT,
+}
+
+// TextPattern exposes the text content of an element.
+TextPattern :: struct {
+	using _: ^TextPattern_Vtbl,
+}
+
+// TextPattern_Vtbl matches the IUIAutomationTextPattern vtable.
+TextPattern_Vtbl :: struct {
+	using _:                   IUnknownVtbl,
+	RangeFromPoint:            proc "system" (
+		This: rawptr,
+		point: windows.POINT,
+		range: ^^TextRange,
+	) -> windows.HRESULT,
+	RangeFromChild:            proc "system" (
+		This: rawptr,
+		child: ^IUIAutomationElement,
+		range: ^^TextRange,
+	) -> windows.HRESULT,
+	GetSelection:              proc "system" (This: rawptr, ranges: ^rawptr) -> windows.HRESULT,
+	GetVisibleRanges:          proc "system" (This: rawptr, ranges: ^rawptr) -> windows.HRESULT,
+	GetDocumentRange:          proc "system" (This: rawptr, range: ^^TextRange) -> windows.HRESULT,
+	GetSupportedTextSelection: proc "system" (This: rawptr, value: ^i32) -> windows.HRESULT,
+}
+
 // free_bstr releases a BSTR returned by this package.
 free_bstr :: proc(bstr: windows.BSTR) {
 	SysFreeString(bstr)
@@ -684,6 +764,38 @@ pattern_select :: proc(pattern: rawptr) -> i32 {
 pattern_toggle :: proc(pattern: rawptr) -> i32 {
 	p := (^TogglePattern)(pattern)
 	return i32(p->Toggle())
+}
+
+// element_current_value reads an element's ValuePattern value as a BSTR, or
+// nil when the element has no value pattern.
+element_current_value :: proc(el: ^IUIAutomationElement) -> (windows.BSTR, i32) {
+	pattern, hr := element_get_pattern(el, Value_Pattern_Id)
+	if hr != 0 || pattern == nil {
+		return nil, hr
+	}
+	p := (^ValuePattern)(pattern)
+	value: windows.BSTR
+	hr = i32(p->GetCurrentValue(&value))
+	return value, hr
+}
+
+// element_text reads up to max_length characters of an element's text
+// content through the Text pattern.
+element_text :: proc(el: ^IUIAutomationElement, max_length: i32) -> (windows.BSTR, i32) {
+	pattern, hr := element_get_pattern(el, Text_Pattern_Id)
+	if hr != 0 || pattern == nil {
+		return nil, hr
+	}
+	p := (^TextPattern)(pattern)
+	range: ^TextRange
+	hr = i32(p->GetDocumentRange(&range))
+	if hr != 0 {
+		return nil, hr
+	}
+	defer range->Release()
+	text: windows.BSTR
+	hr = i32(range->GetText(max_length, &text))
+	return text, hr
 }
 
 // array_length returns the number of elements in an array.
