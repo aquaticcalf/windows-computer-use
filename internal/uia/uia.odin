@@ -18,7 +18,17 @@ Error :: enum {
 	Element_Unavailable,
 	// Name_Unavailable reports that an element name could not be read.
 	Name_Unavailable,
+	// Pattern_Not_Available reports that an element does not support the
+	// requested pattern.
+	Pattern_Not_Available,
+	// Action_Failed reports that a pattern action returned an error.
+	Action_Failed,
 }
+
+// Scroll_Amount values passed to scroll.
+Scroll_Amount_Large :: binding.Scroll_Amount_Large
+Scroll_Amount_Small :: binding.Scroll_Amount_Small
+Scroll_Amount_No_Amount :: binding.Scroll_Amount_No_Amount
 
 // Tree_Scope_Element matches only the element itself.
 Tree_Scope_Element :: binding.Tree_Scope_Element
@@ -266,6 +276,69 @@ next_sibling :: proc(a: ^Automation, el: ^Element) -> (Element, bool) {
 		return {}, false
 	}
 	return Element{ptr = sibling}, true
+}
+
+// invoke performs the element's default action without moving the cursor.
+invoke :: proc(el: ^Element) -> Error {
+	pattern, hr := binding.element_get_pattern(el.ptr, binding.Invoke_Pattern_Id)
+	if hr != 0 || pattern == nil {
+		return .Pattern_Not_Available
+	}
+	if binding.pattern_invoke(pattern) != 0 {
+		return .Action_Failed
+	}
+	return .None
+}
+
+// set_value writes a string value into a value-settable element.
+set_value :: proc(el: ^Element, value: string) -> Error {
+	pattern, hr := binding.element_get_pattern(el.ptr, binding.Value_Pattern_Id)
+	if hr != 0 || pattern == nil {
+		return .Pattern_Not_Available
+	}
+
+	buf: [4096]u16
+	wide := windows.utf8_to_wstring_buf(buf[:], value)
+	if binding.pattern_set_value(pattern, wide) != 0 {
+		return .Action_Failed
+	}
+	return .None
+}
+
+// scroll scrolls a scrollable element by the given amounts.
+scroll :: proc(el: ^Element, horizontal: i32, vertical: i32) -> Error {
+	pattern, hr := binding.element_get_pattern(el.ptr, binding.Scroll_Pattern_Id)
+	if hr != 0 || pattern == nil {
+		return .Pattern_Not_Available
+	}
+	if binding.pattern_scroll(pattern, horizontal, vertical) != 0 {
+		return .Action_Failed
+	}
+	return .None
+}
+
+// select selects an item in a selection container.
+select :: proc(el: ^Element) -> Error {
+	pattern, hr := binding.element_get_pattern(el.ptr, binding.Selection_Item_Pattern_Id)
+	if hr != 0 || pattern == nil {
+		return .Pattern_Not_Available
+	}
+	if binding.pattern_select(pattern) != 0 {
+		return .Action_Failed
+	}
+	return .None
+}
+
+// toggle cycles an element's toggle state.
+toggle :: proc(el: ^Element) -> Error {
+	pattern, hr := binding.element_get_pattern(el.ptr, binding.Toggle_Pattern_Id)
+	if hr != 0 || pattern == nil {
+		return .Pattern_Not_Available
+	}
+	if binding.pattern_toggle(pattern) != 0 {
+		return .Action_Failed
+	}
+	return .None
 }
 
 // bstr_length counts the UTF-16 units in a null-terminated BSTR.

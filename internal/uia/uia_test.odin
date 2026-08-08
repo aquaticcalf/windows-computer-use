@@ -75,4 +75,45 @@ test_surface_end_to_end :: proc(t: ^testing.T) {
 	count, cerr := element_count(&arr)
 	testing.expect(t, cerr == .None)
 	testing.expect(t, count >= 1)
+
+	// Patterns: an element without a pattern fails gracefully, and a real
+	// Win32 button can be invoked without moving the cursor.
+	testing.expect(t, invoke(&el) == .Pattern_Not_Available)
+	testing.expect(t, toggle(&el) == .Pattern_Not_Available)
+	testing.expect(t, select(&el) == .Pattern_Not_Available)
+
+	button := create_button()
+	testing.expect(t, button != nil)
+	if button != nil {
+		defer windows.DestroyWindow(button)
+		bel, berr := element_from_handle(&a, button)
+		testing.expect(t, berr == .None)
+		if berr == .None {
+			defer release_element(&bel)
+			testing.expect(t, invoke(&bel) == .None)
+		}
+	}
+}
+
+// create_button makes a Win32 push button; UIA exposes InvokePattern on it.
+create_button :: proc() -> windows.HWND {
+	class_buf: [16]u16
+	text_buf: [16]u16
+	class := windows.utf8_to_wstring_buf(class_buf[:], "BUTTON")
+	text := windows.utf8_to_wstring_buf(text_buf[:], "invoke me")
+	// WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON
+	return windows.CreateWindowExW(
+		0,
+		class,
+		text,
+		0x50000000,
+		0,
+		0,
+		40,
+		20,
+		windows.GetDesktopWindow(),
+		nil,
+		nil,
+		nil,
+	)
 }

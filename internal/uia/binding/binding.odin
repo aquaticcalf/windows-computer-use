@@ -559,9 +559,131 @@ element_bounding_rect :: proc(el: ^IUIAutomationElement) -> (windows.RECT, i32) 
 	return rect, i32(hr)
 }
 
+// UIA pattern ids (UIA_PATTERN_ID).
+Invoke_Pattern_Id :: 10000
+Value_Pattern_Id :: 10002
+Scroll_Pattern_Id :: 10004
+Selection_Item_Pattern_Id :: 10010
+Toggle_Pattern_Id :: 10015
+Window_Pattern_Id :: 10009
+
+// ScrollAmount values passed to ScrollPattern.Scroll.
+Scroll_Amount_Large :: 0
+Scroll_Amount_Small :: 1
+Scroll_Amount_No_Amount :: 2
+
+// InvokePattern performs the element's default action.
+InvokePattern :: struct {
+	using _: ^InvokePattern_Vtbl,
+}
+
+// InvokePattern_Vtbl matches the IUIAutomationInvokePattern vtable.
+InvokePattern_Vtbl :: struct {
+	using _: IUnknownVtbl,
+	Invoke:  proc "system" (This: rawptr) -> windows.HRESULT,
+}
+
+// ValuePattern reads and sets an element's value.
+ValuePattern :: struct {
+	using _: ^ValuePattern_Vtbl,
+}
+
+// ValuePattern_Vtbl matches the IUIAutomationValuePattern vtable.
+ValuePattern_Vtbl :: struct {
+	using _:              IUnknownVtbl,
+	SetValue:             proc "system" (This: rawptr, value: windows.LPCWSTR) -> windows.HRESULT,
+	GetCurrentValue:      proc "system" (This: rawptr, value: ^windows.BSTR) -> windows.HRESULT,
+	GetCurrentIsReadOnly: proc "system" (
+		This: rawptr,
+		read_only: ^windows.BOOL,
+	) -> windows.HRESULT,
+}
+
+// ScrollPattern scrolls a scrollable element.
+ScrollPattern :: struct {
+	using _: ^ScrollPattern_Vtbl,
+}
+
+// ScrollPattern_Vtbl matches the IUIAutomationScrollPattern vtable.
+ScrollPattern_Vtbl :: struct {
+	using _:          IUnknownVtbl,
+	Scroll:           proc "system" (
+		This: rawptr,
+		horizontal: i32,
+		vertical: i32,
+	) -> windows.HRESULT,
+	SetScrollPercent: proc "system" (
+		This: rawptr,
+		horizontal: f64,
+		vertical: f64,
+	) -> windows.HRESULT,
+}
+
+// SelectionItemPattern selects an item in a selection container.
+SelectionItemPattern :: struct {
+	using _: ^SelectionItemPattern_Vtbl,
+}
+
+// SelectionItemPattern_Vtbl matches the IUIAutomationSelectionItemPattern vtable.
+SelectionItemPattern_Vtbl :: struct {
+	using _:             IUnknownVtbl,
+	Select:              proc "system" (This: rawptr) -> windows.HRESULT,
+	AddToSelection:      proc "system" (This: rawptr) -> windows.HRESULT,
+	RemoveFromSelection: proc "system" (This: rawptr) -> windows.HRESULT,
+}
+
+// TogglePattern cycles an element's toggle state.
+TogglePattern :: struct {
+	using _: ^TogglePattern_Vtbl,
+}
+
+// TogglePattern_Vtbl matches the IUIAutomationTogglePattern vtable.
+TogglePattern_Vtbl :: struct {
+	using _: IUnknownVtbl,
+	Toggle:  proc "system" (This: rawptr) -> windows.HRESULT,
+}
+
 // free_bstr releases a BSTR returned by this package.
 free_bstr :: proc(bstr: windows.BSTR) {
 	SysFreeString(bstr)
+}
+
+// element_get_pattern fetches a pattern by id from an element, or nil when
+// the element does not support it.
+element_get_pattern :: proc(el: ^IUIAutomationElement, pattern_id: i32) -> (rawptr, i32) {
+	pattern: rawptr
+	hr := el->GetCurrentPattern(pattern_id, &pattern)
+	return pattern, i32(hr)
+}
+
+// pattern_invoke performs the default action on an Invoke pattern.
+pattern_invoke :: proc(pattern: rawptr) -> i32 {
+	p := (^InvokePattern)(pattern)
+	return i32(p->Invoke())
+}
+
+// pattern_set_value writes a wide string value to a Value pattern.
+pattern_set_value :: proc(pattern: rawptr, value: windows.LPCWSTR) -> i32 {
+	p := (^ValuePattern)(pattern)
+	return i32(p->SetValue(value))
+}
+
+// pattern_scroll scrolls a Scroll pattern by the given amounts.
+pattern_scroll :: proc(pattern: rawptr, horizontal: i32, vertical: i32) -> i32 {
+	p := (^ScrollPattern)(pattern)
+	return i32(p->Scroll(horizontal, vertical))
+}
+
+// pattern_select selects an item in a SelectionItem pattern.
+pattern_select :: proc(pattern: rawptr) -> i32 {
+	p := (^SelectionItemPattern)(pattern)
+	return i32(p->Select())
+}
+
+// pattern_toggle cycles the state of a Toggle pattern.
+pattern_toggle :: proc(pattern: rawptr) -> i32 {
+	p := (^TogglePattern)(pattern)
+	return i32(p->Toggle())
 }
 
 // array_length returns the number of elements in an array.
