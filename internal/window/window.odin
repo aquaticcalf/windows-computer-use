@@ -106,12 +106,15 @@ force_foreground :: proc(hwnd: windows.HWND) -> bool {
 	return windows.GetForegroundWindow() == hwnd
 }
 
+// collect_context carries the scratch buffer and cursor for the EnumWindows
+// callback. It exists to keep the callback allocation-free.
 collect_context :: struct {
 	handles:  [^]windows.HWND,
 	count:    ^int,
 	capacity: int,
 }
 
+// collect_cb appends one top-level window handle into the collect_context.
 collect_cb :: proc "system" (hwnd: windows.HWND, lparam: windows.LPARAM) -> windows.BOOL {
 	c := (^collect_context)(uintptr(lparam))
 	if c.count^ < c.capacity {
@@ -121,6 +124,7 @@ collect_cb :: proc "system" (hwnd: windows.HWND, lparam: windows.LPARAM) -> wind
 	return windows.BOOL(true)
 }
 
+// title_of reads a window title into a UTF-8 string on the given allocator.
 title_of :: proc(hwnd: windows.HWND, allocator := context.allocator) -> string {
 	buf: [1024]u16
 	length := windows.GetWindowTextW(hwnd, &buf[0], 1024)
@@ -131,6 +135,7 @@ title_of :: proc(hwnd: windows.HWND, allocator := context.allocator) -> string {
 	return text
 }
 
+// pid_of returns the process id that owns a window.
 pid_of :: proc(hwnd: windows.HWND) -> u32 {
 	pid: u32
 	windows.GetWindowThreadProcessId(hwnd, &pid)

@@ -20,7 +20,9 @@ OBJID_CLIENT :: 0xFFFFFFFC
 
 // KEYEVENTF_* flags for SendInput keyboard events.
 KEYEVENTF_KEYUP :: 0x0002
+// KEYEVENTF_UNICODE marks a scan-code based (text) key event.
 KEYEVENTF_UNICODE :: 0x0004
+// KEYEVENTF_EXTENDEDKEY marks an extended keyboard key.
 KEYEVENTF_EXTENDEDKEY :: 0x0001
 
 // ShowWindow commands.

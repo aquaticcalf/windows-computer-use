@@ -12,6 +12,7 @@ foreign import oleaut32 "system:OleAut32.lib"
 
 @(default_calling_convention = "system")
 foreign oleaut32 {
+	// SysFreeString releases a BSTR allocated by COM.
 	SysFreeString :: proc(bstr: windows.BSTR) ---
 }
 
@@ -56,6 +57,7 @@ Variant :: struct {
 	data: [16]u8,
 }
 
+// IUnknownVtbl is the base COM vtable: QueryInterface, AddRef, Release.
 IUnknownVtbl :: struct {
 	QueryInterface: proc "system" (
 		This: rawptr,
@@ -66,17 +68,22 @@ IUnknownVtbl :: struct {
 	Release:        proc "system" (This: rawptr) -> windows.ULONG,
 }
 
+// IUIAutomationCondition is an opaque condition object used in queries.
 IUIAutomationCondition :: struct {
 	using _: ^IUnknownVtbl,
 }
+// IUIAutomationCacheRequest is an opaque cache request object.
 IUIAutomationCacheRequest :: struct {
 	using _: ^IUnknownVtbl,
 }
 
+// IUIAutomationElement is a handle to a UI element.
 IUIAutomationElement :: struct {
 	using _: ^IUIAutomationElement_Vtbl,
 }
 
+// IUIAutomationElement_Vtbl matches the IUIAutomationElement vtable from
+// uiautomationclient.h. Keep the method order exact.
 IUIAutomationElement_Vtbl :: struct {
 	using _:                        IUnknownVtbl,
 	SetFocus:                       proc "system" (This: rawptr) -> windows.HRESULT,
@@ -256,10 +263,12 @@ IUIAutomationElement_Vtbl :: struct {
 	) -> windows.HRESULT,
 }
 
+// IUIAutomationElementArray is a collection of elements returned by FindAll.
 IUIAutomationElementArray :: struct {
 	using _: ^IUIAutomationElementArray_Vtbl,
 }
 
+// IUIAutomationElementArray_Vtbl matches the element array vtable.
 IUIAutomationElementArray_Vtbl :: struct {
 	using _:    IUnknownVtbl,
 	Length:     proc "system" (This: rawptr, length: ^i32) -> windows.HRESULT,
@@ -270,10 +279,12 @@ IUIAutomationElementArray_Vtbl :: struct {
 	) -> windows.HRESULT,
 }
 
+// IUIAutomationTreeWalker walks the accessibility tree in a given view.
 IUIAutomationTreeWalker :: struct {
 	using _: ^IUIAutomationTreeWalker_Vtbl,
 }
 
+// IUIAutomationTreeWalker_Vtbl matches the tree walker vtable.
 IUIAutomationTreeWalker_Vtbl :: struct {
 	using _:                   IUnknownVtbl,
 	GetParentElement:          proc "system" (
@@ -308,10 +319,12 @@ IUIAutomationTreeWalker_Vtbl :: struct {
 	) -> windows.HRESULT,
 }
 
+// IUIAutomation is the root automation object.
 IUIAutomation :: struct {
 	using _: ^IUIAutomation_Vtbl,
 }
 
+// IUIAutomation_Vtbl matches the IUIAutomation vtable from uiautomationclient.h.
 IUIAutomation_Vtbl :: struct {
 	using _:                           IUnknownVtbl,
 	CompareElements:                   proc "system" (
@@ -458,6 +471,7 @@ IID_IUIAutomation := windows.IID {
 	{0xAB, 0x13, 0x7A, 0xC5, 0xAC, 0x48, 0x25, 0xEE},
 }
 
+// create_automation creates the CUIAutomation COM object.
 create_automation :: proc() -> (^IUIAutomation, i32) {
 	ppv: windows.LPVOID
 	hr := windows.CoCreateInstance(
@@ -473,16 +487,19 @@ create_automation :: proc() -> (^IUIAutomation, i32) {
 	return (^IUIAutomation)(ppv), 0
 }
 
+// release_automation releases an automation object.
 release_automation :: proc(a: ^IUIAutomation) {
 	a->Release()
 }
 
+// get_root_element returns the element for the entire desktop.
 get_root_element :: proc(a: ^IUIAutomation) -> (^IUIAutomationElement, i32) {
 	root: ^IUIAutomationElement
 	hr := a->GetRootElement(&root)
 	return root, i32(hr)
 }
 
+// element_from_handle resolves the element that owns a window handle.
 element_from_handle :: proc(
 	a: ^IUIAutomation,
 	hwnd: windows.HWND,
@@ -495,10 +512,12 @@ element_from_handle :: proc(
 	return el, i32(hr)
 }
 
+// release_element releases an element.
 release_element :: proc(el: ^IUIAutomationElement) {
 	el->Release()
 }
 
+// element_find_all collects every element matching the condition in scope.
 element_find_all :: proc(
 	el: ^IUIAutomationElement,
 	scope: i32,
@@ -512,40 +531,47 @@ element_find_all :: proc(
 	return arr, i32(hr)
 }
 
+// element_name reads the element's current name as a BSTR.
 element_name :: proc(el: ^IUIAutomationElement) -> (windows.BSTR, i32) {
 	name: windows.BSTR
 	hr := el->GetCurrentName(&name)
 	return name, i32(hr)
 }
 
+// element_control_type reads the element's UIA control type id.
 element_control_type :: proc(el: ^IUIAutomationElement) -> (i32, i32) {
 	control_type: i32
 	hr := el->GetCurrentControlType(&control_type)
 	return control_type, i32(hr)
 }
 
+// element_is_enabled reports whether the element accepts input.
 element_is_enabled :: proc(el: ^IUIAutomationElement) -> (bool, i32) {
 	enabled: windows.BOOL
 	hr := el->GetCurrentIsEnabled(&enabled)
 	return bool(enabled), i32(hr)
 }
 
+// element_bounding_rect reads the element's on-screen rectangle.
 element_bounding_rect :: proc(el: ^IUIAutomationElement) -> (windows.RECT, i32) {
 	rect: windows.RECT
 	hr := el->GetCurrentBoundingRectangle(&rect)
 	return rect, i32(hr)
 }
 
+// free_bstr releases a BSTR returned by this package.
 free_bstr :: proc(bstr: windows.BSTR) {
 	SysFreeString(bstr)
 }
 
+// array_length returns the number of elements in an array.
 array_length :: proc(arr: ^IUIAutomationElementArray) -> (i32, i32) {
 	length: i32
 	hr := arr->Length(&length)
 	return length, i32(hr)
 }
 
+// array_element returns the element at the given index in an array.
 array_element :: proc(
 	arr: ^IUIAutomationElementArray,
 	index: i32,
@@ -558,20 +584,24 @@ array_element :: proc(
 	return el, i32(hr)
 }
 
+// release_array releases an element array.
 release_array :: proc(arr: ^IUIAutomationElementArray) {
 	arr->Release()
 }
 
+// get_control_view_walker returns the control-view tree walker.
 get_control_view_walker :: proc(a: ^IUIAutomation) -> (^IUIAutomationTreeWalker, i32) {
 	walker: ^IUIAutomationTreeWalker
 	hr := a->GetControlViewWalker(&walker)
 	return walker, i32(hr)
 }
 
+// release_walker releases a tree walker.
 release_walker :: proc(walker: ^IUIAutomationTreeWalker) {
 	walker->Release()
 }
 
+// walker_first_child returns the first child of an element.
 walker_first_child :: proc(
 	walker: ^IUIAutomationTreeWalker,
 	el: ^IUIAutomationElement,
@@ -584,6 +614,7 @@ walker_first_child :: proc(
 	return child, i32(hr)
 }
 
+// walker_next_sibling returns the next sibling of an element.
 walker_next_sibling :: proc(
 	walker: ^IUIAutomationTreeWalker,
 	el: ^IUIAutomationElement,
@@ -596,12 +627,14 @@ walker_next_sibling :: proc(
 	return sibling, i32(hr)
 }
 
+// create_true_condition builds a condition that matches every element.
 create_true_condition :: proc(a: ^IUIAutomation) -> (^IUIAutomationCondition, i32) {
 	condition: ^IUIAutomationCondition
 	hr := a->CreateTrueCondition(&condition)
 	return condition, i32(hr)
 }
 
+// release_condition releases a condition object.
 release_condition :: proc(condition: ^IUIAutomationCondition) {
 	condition->Release()
 }

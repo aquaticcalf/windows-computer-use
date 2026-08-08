@@ -20,6 +20,8 @@ mouse_input :: proc(x, y: i32, flags: u32) -> windows.INPUT {
 	return windows.INPUT{type = .MOUSE, mi = {dx = x, dy = y, dwFlags = flags}}
 }
 
+// key_input builds a keyboard INPUT struct from a virtual key, scan code,
+// and flags.
 key_input :: proc(vk: u16, scan: u16, flags: u32) -> windows.INPUT {
 	return windows.INPUT{type = .KEYBOARD, ki = {wVk = vk, wScan = scan, dwFlags = flags}}
 }
@@ -47,6 +49,7 @@ type_text :: proc(text: string) {
 	}
 }
 
+// send injects one INPUT event into the global input stream.
 send :: proc(input: windows.INPUT) {
 	local := input
 	windows.SendInput(1, &local, size_of(windows.INPUT))

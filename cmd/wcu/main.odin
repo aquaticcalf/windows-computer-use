@@ -3,8 +3,10 @@ package main
 import "core:fmt"
 import "core:os"
 
+// VERSION is the semantic version of the CLI.
 VERSION :: "0.0.1"
 
+// main dispatches on the first argument and runs the matching command.
 main :: proc() {
 	args := os.args[1:]
 
@@ -56,10 +58,12 @@ main :: proc() {
 	}
 }
 
+// stub reports that a command is not implemented yet.
 stub :: proc(command: string) {
 	fmt.eprintf("wcu: '%s' is not implemented yet (tracked on the project board).\n", command)
 }
 
+// print_help writes usage text for every command to stdout.
 print_help :: proc() {
 	fmt.println("wcu - Windows Computer Use (CLI + MCP server)")
 	fmt.println()
