@@ -1,19 +1,21 @@
 ODIN ?= odin
 BIN  := bin/wcu.exe
+CMD  := cmd/wcu
 
 build:
-	$(ODIN) build cmd/wcu -out:$(BIN)
+	mkdir -p bin
+	$(ODIN) build $(CMD) -out:$(BIN)
 
 run:
-	$(ODIN) run cmd/wcu -- $(ARGS)
+	$(ODIN) run $(CMD) -- $(ARGS)
+
+check:
+	$(ODIN) check $(CMD)
 
 test:
-	$(ODIN) test internal/version
-
-vet:
-	$(ODIN) check cmd/wcu
+	for d in internal/*/; do $(ODIN) test $$d || exit 1; done
 
 clean:
 	rm -rf bin
 
-.PHONY: build run test vet clean
+.PHONY: build run check test clean

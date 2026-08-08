@@ -24,13 +24,13 @@ jobs:
           "${{ github.workspace }}\odin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Check
-        run: odin check cmd/wcu
+        run: .\build.ps1 check
 
       - name: Build
-        run: odin build cmd/wcu -out:bin/wcu.exe
+        run: .\build.ps1 build
 
       - name: Test
-        run: odin test internal/version
+        run: .\build.ps1 test
 
       - name: Help smoke test
         run: .\bin\wcu.exe -h

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("build", "run", "test", "vet", "clean")]
+    [ValidateSet("build", "run", "test", "check", "clean")]
     [string]$Target = "build"
 )
 
@@ -7,24 +7,29 @@ $ErrorActionPreference = "Stop"
 $Odin = "odin"
 $Bin = "bin"
 $Out = "$Bin\wcu.exe"
+$CmdDir = "cmd/wcu"
+$InternalDirs = Get-ChildItem -Path internal -Directory
 
 switch ($Target) {
     "build" {
-        & $Odin build cmd/wcu -out:$Out
+        New-Item -ItemType Directory -Force -Path $Bin | Out-Null
+        & $Odin build $CmdDir -out:$Out
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         Write-Host "built $Out"
     }
     "run" {
-        & $Odin run cmd/wcu -- @($args)
+        & $Odin run $CmdDir -- @($args)
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+    "check" {
+        & $Odin check $CmdDir
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
     "test" {
-        & $Odin test internal/version
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    }
-    "vet" {
-        & $Odin check cmd/wcu
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        foreach ($d in $InternalDirs) {
+            & $Odin test $d.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
     }
     "clean" {
         if (Test-Path $Bin) { Remove-Item -Recurse -Force $Bin }
