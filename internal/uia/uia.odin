@@ -1,169 +1,89 @@
 package uia
 
+import "binding"
 import windows "core:sys/windows"
 
-// Hand-written UI Automation COM bindings. See issue #8 and ARCHITECTURE.md
-// (Perception). The vtables must match the exact method order from
-// uiautomationclient.h; extend in order as more of the API is used.
+// The public surface of the UI Automation adapter. Callers and tests only
+// ever see these types; the raw COM interfaces live in the "binding" leaf.
+// See DESIGN.md (deep modules, dependency classes).
 
-IUnknownVtbl :: struct {
-	QueryInterface: proc "system" (
-		This: rawptr,
-		riid: windows.REFIID,
-		ppv: ^rawptr,
-	) -> windows.HRESULT,
-	AddRef:         proc "system" (This: rawptr) -> windows.ULONG,
-	Release:        proc "system" (This: rawptr) -> windows.ULONG,
-}
-
-IUIAutomationElement :: struct {
-	using _: ^IUnknownVtbl,
-}
-IUIAutomationCondition :: struct {
-	using _: ^IUnknownVtbl,
-}
-IUIAutomationTreeWalker :: struct {
-	using _: ^IUnknownVtbl,
-}
-IUIAutomationElementArray :: struct {
-	using _: ^IUnknownVtbl,
-}
-
-IUIAutomationVtbl :: struct {
-	using _:                     IUnknownVtbl,
-	CompareElements:             proc "system" (
-		This: rawptr,
-		e1: ^IUIAutomationElement,
-		e2: ^IUIAutomationElement,
-		same: ^windows.BOOL,
-	) -> windows.HRESULT,
-	CompareRuntimeIds:           proc "system" (
-		This: rawptr,
-		r1: rawptr,
-		r2: rawptr,
-		same: ^windows.BOOL,
-	) -> windows.HRESULT,
-	GetRootElement:              proc "system" (
-		This: rawptr,
-		root: ^^IUIAutomationElement,
-	) -> windows.HRESULT,
-	ElementFromHandle:           proc "system" (
-		This: rawptr,
-		hwnd: windows.HWND,
-		el: ^^IUIAutomationElement,
-	) -> windows.HRESULT,
-	ElementFromPoint:            proc "system" (
-		This: rawptr,
-		pt: windows.POINT,
-		el: ^^IUIAutomationElement,
-	) -> windows.HRESULT,
-	GetFocusedElement:           proc "system" (
-		This: rawptr,
-		el: ^^IUIAutomationElement,
-	) -> windows.HRESULT,
-	GetRootElementBuildCache:    proc "system" (
-		This: rawptr,
-		cache: rawptr,
-		root: ^^IUIAutomationElement,
-	) -> windows.HRESULT,
-	ElementFromHandleBuildCache: proc "system" (
-		This: rawptr,
-		hwnd: windows.HWND,
-		cache: rawptr,
-		el: ^^IUIAutomationElement,
-	) -> windows.HRESULT,
-	ElementFromPointBuildCache:  proc "system" (
-		This: rawptr,
-		pt: windows.POINT,
-		cache: rawptr,
-		el: ^^IUIAutomationElement,
-	) -> windows.HRESULT,
-	GetFocusedElementBuildCache: proc "system" (
-		This: rawptr,
-		cache: rawptr,
-		el: ^^IUIAutomationElement,
-	) -> windows.HRESULT,
-	CreateTreeWalker:            proc "system" (
-		This: rawptr,
-		condition: ^IUIAutomationCondition,
-		walker: ^^IUIAutomationTreeWalker,
-	) -> windows.HRESULT,
-	GetControlViewWalker:        proc "system" (
-		This: rawptr,
-		walker: ^^IUIAutomationTreeWalker,
-	) -> windows.HRESULT,
-	GetContentViewWalker:        proc "system" (
-		This: rawptr,
-		walker: ^^IUIAutomationTreeWalker,
-	) -> windows.HRESULT,
-	GetRawViewWalker:            proc "system" (
-		This: rawptr,
-		walker: ^^IUIAutomationTreeWalker,
-	) -> windows.HRESULT,
-}
-IUIAutomation :: struct {
-	using _: ^IUIAutomationVtbl,
-}
-
-CLSID_CUIAutomation := windows.CLSID {
-	0xFF48DBA4,
-	0x60EF,
-	0x4201,
-	{0xAA, 0x87, 0x54, 0x10, 0x3E, 0xEF, 0x59, 0x4E},
-}
-IID_IUIAutomation := windows.IID {
-	0x30CBE57D,
-	0xD9D0,
-	0x452A,
-	{0xAB, 0x13, 0x7A, 0xC5, 0xAC, 0x48, 0x25, 0xEE},
-}
-IID_IUIAutomationElement := windows.IID {
-	0xD22108AA,
-	0x8AC5,
-	0x49A5,
-	{0x83, 0x7B, 0x37, 0xBB, 0xBB, 0x3D, 0x75, 0x91},
+Error :: enum {
+	None,
+	Create_Failed,
+	Element_Unavailable,
+	Name_Unavailable,
 }
 
 Automation :: struct {
-	ptr: ^IUIAutomation,
+	ptr: ^binding.IUIAutomation,
 }
 
-create :: proc() -> (Automation, windows.HRESULT) {
-	ppv: windows.LPVOID
-	hr := windows.CoCreateInstance(
-		&CLSID_CUIAutomation,
-		nil,
-		windows.CLSCTX_INPROC_SERVER,
-		&IID_IUIAutomation,
-		&ppv,
-	)
+Element :: struct {
+	ptr: ^binding.IUIAutomationElement,
+}
+
+create :: proc() -> (Automation, Error) {
+	ptr, hr := binding.create_automation()
 	if hr != 0 {
-		return Automation{}, hr
+		return {}, .Create_Failed
 	}
-	return Automation{ptr = (^IUIAutomation)(ppv)}, 0
+	return Automation{ptr = ptr}, .None
 }
 
 destroy :: proc(a: ^Automation) {
 	if a.ptr != nil {
-		a.ptr->Release()
+		binding.release_automation(a.ptr)
 		a.ptr = nil
 	}
 }
 
-element_from_handle :: proc(
-	a: ^Automation,
-	hwnd: windows.HWND,
-) -> (
-	^IUIAutomationElement,
-	windows.HRESULT,
-) {
-	el: ^IUIAutomationElement
-	hr := a.ptr->ElementFromHandle(hwnd, &el)
-	return el, hr
+element_from_handle :: proc(a: ^Automation, hwnd: windows.HWND) -> (Element, Error) {
+	ptr, hr := binding.element_from_handle(a.ptr, hwnd)
+	if hr != 0 {
+		return {}, .Element_Unavailable
+	}
+	return Element{ptr = ptr}, .None
 }
 
-root_element :: proc(a: ^Automation) -> (^IUIAutomationElement, windows.HRESULT) {
-	root: ^IUIAutomationElement
-	hr := a.ptr->GetRootElement(&root)
-	return root, hr
+root_element :: proc(a: ^Automation) -> (Element, Error) {
+	ptr, hr := binding.get_root_element(a.ptr)
+	if hr != 0 {
+		return {}, .Element_Unavailable
+	}
+	return Element{ptr = ptr}, .None
+}
+
+release_element :: proc(el: ^Element) {
+	if el.ptr != nil {
+		binding.release_element(el.ptr)
+		el.ptr = nil
+	}
+}
+
+name :: proc(el: ^Element, allocator := context.allocator) -> (string, Error) {
+	bstr, hr := binding.element_name(el.ptr)
+	if hr != 0 {
+		return "", .Name_Unavailable
+	}
+	defer binding.free_bstr(bstr)
+
+	length := bstr_length(bstr)
+	if length == 0 {
+		return "", .None
+	}
+
+	text, _ := windows.wstring_to_utf8_alloc(windows.wstring(bstr), length, allocator)
+	if len(text) == 0 {
+		return "", .None
+	}
+	return text, .None
+}
+
+bstr_length :: proc(b: windows.BSTR) -> int {
+	chars := ([^]u16)(b)
+	length := 0
+	for chars[length] != 0 {
+		length += 1
+	}
+	return length
 }

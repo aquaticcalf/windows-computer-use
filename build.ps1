@@ -9,7 +9,7 @@ $Bin = "bin"
 $Out = "$Bin\wcu.exe"
 $CmdDir = "cmd/wcu"
 $Strict = @("-vet", "-strict-style", "-vet-tabs", "-disallow-do", "-warnings-as-errors")
-$InternalDirs = Get-ChildItem -Path internal -Directory
+$InternalDirs = Get-ChildItem -Path internal -Recurse -Directory
 
 switch ($Target) {
     "build" {

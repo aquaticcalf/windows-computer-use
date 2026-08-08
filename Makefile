@@ -14,7 +14,7 @@ check:
 	$(ODIN) check $(CMD) $(STRICT)
 
 test:
-	for d in internal/*/; do $(ODIN) test $$d $(STRICT) || exit 1; done
+	for d in $$(find internal -type d); do $(ODIN) test $$d $(STRICT) || exit 1; done
 
 clean:
 	rm -rf bin

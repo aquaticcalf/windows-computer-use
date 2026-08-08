@@ -11,6 +11,7 @@
 		"cmd/wcu",
 		"internal/version",
 		"internal/win32",
-		"internal/uia"
+		"internal/uia",
+		"internal/uia/binding"
 	]
 }
