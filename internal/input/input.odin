@@ -7,6 +7,7 @@ import "core:sys/windows"
 // when a target cannot be driven through accessibility; it injects into the
 // global input stream. See ARCHITECTURE.md (Actions) and DESIGN.md.
 
+// Mouse_Button selects which button click simulates.
 Mouse_Button :: enum u32 {
 	Left   = 0,
 	Right  = 1,
@@ -23,6 +24,7 @@ key_input :: proc(vk: u16, scan: u16, flags: u32) -> windows.INPUT {
 	return windows.INPUT{type = .KEYBOARD, ki = {wVk = vk, wScan = scan, dwFlags = flags}}
 }
 
+// click moves the pointer to x, y and presses the given mouse button.
 click :: proc(x, y: i32, button: Mouse_Button = .Left) {
 	down, up := mouse_button_flags(button)
 	windows.SetCursorPos(x, y)
@@ -30,11 +32,13 @@ click :: proc(x, y: i32, button: Mouse_Button = .Left) {
 	send(mouse_input(0, 0, up))
 }
 
+// press_key presses and releases the virtual key with the given code.
 press_key :: proc(vk: u16) {
 	send(key_input(vk, 0, 0))
 	send(key_input(vk, 0, win32.KEYEVENTF_KEYUP))
 }
 
+// type_text sends the text as Unicode keyboard events.
 type_text :: proc(text: string) {
 	for ch in text {
 		unit := u16(ch)
@@ -48,6 +52,7 @@ send :: proc(input: windows.INPUT) {
 	windows.SendInput(1, &local, size_of(windows.INPUT))
 }
 
+// mouse_button_flags returns the down and up event flags for a button.
 mouse_button_flags :: proc(button: Mouse_Button) -> (down, up: u32) {
 	switch button {
 	case .Left:

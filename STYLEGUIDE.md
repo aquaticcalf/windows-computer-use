@@ -35,6 +35,37 @@ idiomatic way, not to work around the tooling.
 One package per directory; the `package` name matches the folder. Alias long
 imports to a short name.
 
+## Comments and documentation
+
+Documentation is a first-class part of the code. Every public symbol in a
+package carries a doc comment so an IDE, another agent, and a future reader
+know exactly what it is without reading the body.
+
+- **Doc comments on everything public**: every procedure, type, enum value,
+  constant, and non-obvious struct field gets a `//` comment above it.
+- **Start the comment with the symbol name** (Go-style): `// list enumerates
+  top-level windows.` The first sentence says what the thing is in one line.
+- **Say what, why, and the contract**: for procedures, cover parameters,
+  return values, error behavior, ownership of allocated memory, and any
+  ordering or lifetime rules a caller must honor. For types, describe the
+  zero value and when it is valid.
+- **Document the surface, not the body.** Do not restate the code line by
+  line; say what a caller needs to know. Comment the tricky internals only
+  where the why is not obvious.
+- **Keep comments current.** A comment that no longer matches the code is
+  worse than none; update it in the same change that edits the code.
+- Package files start with a short comment naming the package and its
+  purpose (what it owns and what lives behind it, per DESIGN.md).
+
+```odin
+// create builds a UI Automation session and its control-view walker.
+// The caller owns the session and must call destroy when done.
+create :: proc() -> (Automation, Error) { ... }
+```
+
+Regular `//` line comments are for intent ("why"), not restatements ("what").
+
+
 ## Declarations and initialization
 
 - Write `val: int` and `val := 5` (colon hugs the name, space after it).

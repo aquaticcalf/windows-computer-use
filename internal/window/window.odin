@@ -8,6 +8,7 @@ import "core:sys/windows"
 // small domain module over raw user32; keep the COM/UIA concerns elsewhere.
 // See ARCHITECTURE.md (list_apps, focus) and DESIGN.md.
 
+// Window describes one top-level window captured by list.
 Window :: struct {
 	handle:  windows.HWND,
 	title:   string,
@@ -15,6 +16,7 @@ Window :: struct {
 	visible: bool,
 }
 
+// Rect is an axis-aligned rectangle in screen coordinates.
 Rect :: struct {
 	left, top, right, bottom: i32,
 }
@@ -54,6 +56,7 @@ list :: proc(allocator := context.allocator) -> (result: []Window, ok: bool) {
 	return result, true
 }
 
+// find returns the first window whose title contains the given substring.
 find :: proc(windows_: []Window, substring: string) -> (Window, bool) {
 	for w in windows_ {
 		if strings.contains(w.title, substring) {
@@ -71,10 +74,12 @@ destroy :: proc(windows_: []Window, allocator := context.allocator) {
 	delete(windows_, allocator)
 }
 
+// title returns a window's title text, allocated with the supplied allocator.
 title :: proc(hwnd: windows.HWND, allocator := context.allocator) -> string {
 	return title_of(hwnd, allocator)
 }
 
+// rect returns a window's bounding rectangle in screen coordinates.
 rect :: proc(hwnd: windows.HWND) -> (Rect, bool) {
 	r: windows.RECT
 	if windows.GetWindowRect(hwnd, &r) {

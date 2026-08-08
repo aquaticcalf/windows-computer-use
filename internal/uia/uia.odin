@@ -7,34 +7,53 @@ import windows "core:sys/windows"
 // ever see these types; the raw COM interfaces live in the "binding" leaf.
 // See DESIGN.md (deep modules, dependency classes).
 
+// Error is this package's error type. A zero value of None means success;
+// callers can compare against the enum cases to branch on the failure mode.
 Error :: enum {
+	// None reports a successful call.
 	None,
+	// Create_Failed reports that the automation session could not be created.
 	Create_Failed,
+	// Element_Unavailable reports that no element could be resolved.
 	Element_Unavailable,
+	// Name_Unavailable reports that an element name could not be read.
 	Name_Unavailable,
 }
 
+// Tree_Scope_Element matches only the element itself.
 Tree_Scope_Element :: binding.Tree_Scope_Element
+// Tree_Scope_Children matches the element's immediate children.
 Tree_Scope_Children :: binding.Tree_Scope_Children
+// Tree_Scope_Descendants matches the element and all descendants.
 Tree_Scope_Descendants :: binding.Tree_Scope_Descendants
 
+// Rect is an axis-aligned rectangle in screen coordinates.
 Rect :: struct {
 	left, top, right, bottom: i32,
 }
 
+// Automation is a live UI Automation session. It owns the COM automation
+// object and a control-view tree walker. Create one with create and release
+// it with destroy.
 Automation :: struct {
 	ptr:    ^binding.IUIAutomation,
 	walker: ^binding.IUIAutomationTreeWalker,
 }
 
+// Element is a handle to a UI element. It is valid only while the session
+// that produced it is alive; release it with release_element when done.
 Element :: struct {
 	ptr: ^binding.IUIAutomationElement,
 }
 
+// Element_Array is a collection of elements returned by find_all. Release it
+// with release_array when done.
 Element_Array :: struct {
 	ptr: ^binding.IUIAutomationElementArray,
 }
 
+// create builds a UI Automation session together with its control-view tree
+// walker. The caller owns the session and must call destroy when done.
 create :: proc() -> (Automation, Error) {
 	ptr, hr := binding.create_automation()
 	if hr != 0 {
@@ -48,6 +67,7 @@ create :: proc() -> (Automation, Error) {
 	return Automation{ptr = ptr, walker = walker}, .None
 }
 
+// destroy releases the automation session and its tree walker.
 destroy :: proc(a: ^Automation) {
 	if a.ptr != nil {
 		binding.release_walker(a.walker)
@@ -57,6 +77,8 @@ destroy :: proc(a: ^Automation) {
 	}
 }
 
+// element_from_handle resolves the UI element that owns the given window
+// handle. The caller releases the element with release_element.
 element_from_handle :: proc(a: ^Automation, hwnd: windows.HWND) -> (Element, Error) {
 	ptr, hr := binding.element_from_handle(a.ptr, hwnd)
 	if hr != 0 {
@@ -65,6 +87,7 @@ element_from_handle :: proc(a: ^Automation, hwnd: windows.HWND) -> (Element, Err
 	return Element{ptr = ptr}, .None
 }
 
+// root_element returns the element for the entire desktop.
 root_element :: proc(a: ^Automation) -> (Element, Error) {
 	ptr, hr := binding.get_root_element(a.ptr)
 	if hr != 0 {
@@ -73,6 +96,7 @@ root_element :: proc(a: ^Automation) -> (Element, Error) {
 	return Element{ptr = ptr}, .None
 }
 
+// release_element releases an element returned by this package.
 release_element :: proc(el: ^Element) {
 	if el.ptr != nil {
 		binding.release_element(el.ptr)
@@ -80,6 +104,8 @@ release_element :: proc(el: ^Element) {
 	}
 }
 
+// name returns the element's accessible name. The returned string is
+// allocated with the supplied allocator; the caller deletes it.
 name :: proc(el: ^Element, allocator := context.allocator) -> (string, Error) {
 	bstr, hr := binding.element_name(el.ptr)
 	if hr != 0 {
@@ -99,6 +125,8 @@ name :: proc(el: ^Element, allocator := context.allocator) -> (string, Error) {
 	return text, .None
 }
 
+// control_type returns the element's UIA control type id. Map it to a
+// readable role with control_type_name.
 control_type :: proc(el: ^Element) -> (i32, Error) {
 	id, hr := binding.element_control_type(el.ptr)
 	if hr != 0 {
@@ -107,6 +135,7 @@ control_type :: proc(el: ^Element) -> (i32, Error) {
 	return id, .None
 }
 
+// is_enabled reports whether the element currently accepts input.
 is_enabled :: proc(el: ^Element) -> (bool, Error) {
 	enabled, hr := binding.element_is_enabled(el.ptr)
 	if hr != 0 {
@@ -115,6 +144,7 @@ is_enabled :: proc(el: ^Element) -> (bool, Error) {
 	return enabled, .None
 }
 
+// bounding_rect returns the element's on-screen rectangle.
 bounding_rect :: proc(el: ^Element) -> (Rect, Error) {
 	r, hr := binding.element_bounding_rect(el.ptr)
 	if hr != 0 {
@@ -123,6 +153,8 @@ bounding_rect :: proc(el: ^Element) -> (Rect, Error) {
 	return Rect{left = r.left, top = r.top, right = r.right, bottom = r.bottom}, .None
 }
 
+// control_type_name maps a UIA control type id to a short, human-readable
+// role string ("button", "edit", ...), or "unknown".
 control_type_name :: proc(id: i32) -> string {
 	switch id {
 	case binding.Control_Type_Button:
@@ -173,6 +205,9 @@ control_type_name :: proc(id: i32) -> string {
 	return "unknown"
 }
 
+// find_all returns every element under el that matches the given tree scope.
+// It uses a true condition, so it matches all elements in scope. The caller
+// releases the returned array with release_array.
 find_all :: proc(a: ^Automation, el: ^Element, scope: i32) -> (Element_Array, Error) {
 	condition, chr := binding.create_true_condition(a.ptr)
 	if chr != 0 {
@@ -187,6 +222,7 @@ find_all :: proc(a: ^Automation, el: ^Element, scope: i32) -> (Element_Array, Er
 	return Element_Array{ptr = ptr}, .None
 }
 
+// element_count returns the number of elements in the array.
 element_count :: proc(arr: ^Element_Array) -> (i32, Error) {
 	length, hr := binding.array_length(arr.ptr)
 	if hr != 0 {
@@ -195,6 +231,7 @@ element_count :: proc(arr: ^Element_Array) -> (i32, Error) {
 	return length, .None
 }
 
+// element_at returns the element at the given index in the array.
 element_at :: proc(arr: ^Element_Array, index: i32) -> (Element, Error) {
 	ptr, hr := binding.array_element(arr.ptr, index)
 	if hr != 0 {
@@ -203,6 +240,7 @@ element_at :: proc(arr: ^Element_Array, index: i32) -> (Element, Error) {
 	return Element{ptr = ptr}, .None
 }
 
+// release_array releases an element array returned by find_all.
 release_array :: proc(arr: ^Element_Array) {
 	if arr.ptr != nil {
 		binding.release_array(arr.ptr)
@@ -210,6 +248,8 @@ release_array :: proc(arr: ^Element_Array) {
 	}
 }
 
+// first_child returns the first child of el in the control view, or ok=false
+// when el has no children. The caller releases the child with release_element.
 first_child :: proc(a: ^Automation, el: ^Element) -> (Element, bool) {
 	child, hr := binding.walker_first_child(a.walker, el.ptr)
 	if hr != 0 || child == nil {
@@ -218,6 +258,8 @@ first_child :: proc(a: ^Automation, el: ^Element) -> (Element, bool) {
 	return Element{ptr = child}, true
 }
 
+// next_sibling returns the next sibling of el in the control view, or
+// ok=false when el is the last sibling. The caller releases it.
 next_sibling :: proc(a: ^Automation, el: ^Element) -> (Element, bool) {
 	sibling, hr := binding.walker_next_sibling(a.walker, el.ptr)
 	if hr != 0 || sibling == nil {
@@ -226,6 +268,7 @@ next_sibling :: proc(a: ^Automation, el: ^Element) -> (Element, bool) {
 	return Element{ptr = sibling}, true
 }
 
+// bstr_length counts the UTF-16 units in a null-terminated BSTR.
 bstr_length :: proc(b: windows.BSTR) -> int {
 	chars := ([^]u16)(b)
 	length := 0
