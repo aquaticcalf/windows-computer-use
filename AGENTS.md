@@ -13,7 +13,12 @@ messages). SendInput is only a serialized fallback. It ships as a CLI and an
 MCP server over stdio.
 
 The full product and architecture is in `ARCHITECTURE.md`. Read it before
-touching anything larger than a typo.
+touching anything larger than a typo. It is the canonical design reference:
+it contains the system diagram, the perception/action/concurrency/isolation
+designs, the reliability rules, the roadmap (P0-P7), and the known
+limitations. Whenever you implement an issue in a subsystem (perception,
+actions, concurrency, cdp, mcp, isolation, safety), read the matching
+`ARCHITECTURE.md` section first and follow it.
 
 ## The GitHub project board is the plan
 
