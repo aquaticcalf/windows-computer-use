@@ -1,7 +1,9 @@
 package capture
 
+import "core:c"
 import "core:hash"
 import "core:sys/windows"
+import stbi "vendor:stb/image"
 
 foreign import user32 "system:User32.lib"
 
@@ -13,43 +15,42 @@ foreign user32 {
 
 PW_RENDERFULLCONTENT :: 0x00000002
 
-// capture_window captures a window's rectangle and returns the pixels as a
-// PNG byte slice. The PNG encoder is local and writes stored (uncompressed)
-// deflate blocks, so there is no zlib dependency. The caller deletes the
-// result. See ARCHITECTURE.md (optional screenshots).
-capture_window :: proc(
+// capture_pixels captures a window's rectangle into top-down RGBA bytes.
+// The caller owns the slice and deletes it. See ARCHITECTURE.md (screenshots).
+capture_pixels :: proc(
 	hwnd: windows.HWND,
 	allocator := context.allocator,
 ) -> (
-	result: []byte,
+	rgba: []u8,
+	width, height: int,
 	ok: bool,
 ) {
 	rect: windows.RECT
 	if !windows.GetWindowRect(hwnd, &rect) {
-		return nil, false
+		return nil, 0, 0, false
 	}
-	width := rect.right - rect.left
-	height := rect.bottom - rect.top
+	width = int(rect.right - rect.left)
+	height = int(rect.bottom - rect.top)
 	if width <= 0 || height <= 0 {
-		return nil, false
+		return nil, 0, 0, false
 	}
 
 	dc := windows.GetDC(hwnd)
 	if dc == nil {
-		return nil, false
+		return nil, 0, 0, false
 	}
 	defer windows.ReleaseDC(hwnd, dc)
 
 	mem_dc := windows.CreateCompatibleDC(dc)
 	if mem_dc == nil {
-		return nil, false
+		return nil, 0, 0, false
 	}
 	defer windows.DeleteDC(mem_dc)
 
 	bmi := windows.BITMAPINFO{}
 	bmi.bmiHeader.biSize = size_of(windows.BITMAPINFOHEADER)
-	bmi.bmiHeader.biWidth = width
-	bmi.bmiHeader.biHeight = -height
+	bmi.bmiHeader.biWidth = i32(width)
+	bmi.bmiHeader.biHeight = -i32(height)
 	bmi.bmiHeader.biPlanes = 1
 	bmi.bmiHeader.biBitCount = 32
 	bmi.bmiHeader.biCompression = windows.BI_RGB
@@ -57,7 +58,7 @@ capture_window :: proc(
 	bits: windows.PVOID
 	section := windows.CreateDIBSection(dc, &bmi, 0, &bits, nil, 0)
 	if section == nil {
-		return nil, false
+		return nil, 0, 0, false
 	}
 	defer windows.DeleteObject(windows.HGDIOBJ(section))
 
@@ -67,17 +68,18 @@ capture_window :: proc(
 	// GDI BitBlt returns empty pixels for many GPU-composited windows. Ask the
 	// target to render itself first, then retain BitBlt as a legacy fallback.
 	rendered := PrintWindow(hwnd, mem_dc, PW_RENDERFULLCONTENT)
-	if !rendered && !windows.BitBlt(mem_dc, 0, 0, width, height, dc, 0, 0, windows.SRCCOPY) {
-		return nil, false
+	if !rendered &&
+	   !windows.BitBlt(mem_dc, 0, 0, i32(width), i32(height), dc, 0, 0, windows.SRCCOPY) {
+		return nil, 0, 0, false
 	}
 
 	// bits points at top-down BGRA pixels.
 	raw := ([^]u32)(bits)
-	rgba, rerr := make([]u8, int(width) * int(height) * 4, allocator)
+	pixels, rerr := make([]u8, int(width) * int(height) * 4, allocator)
 	if rerr != nil {
-		return nil, false
+		return nil, 0, 0, false
 	}
-	defer delete(rgba, allocator)
+	rgba = pixels
 	for i in 0 ..< width * height {
 		bgra := raw[i]
 		rgba[i * 4 + 0] = u8(bgra)
@@ -85,8 +87,112 @@ capture_window :: proc(
 		rgba[i * 4 + 2] = u8(bgra >> 16)
 		rgba[i * 4 + 3] = u8(bgra >> 24)
 	}
+	return rgba, width, height, true
+}
 
-	return encode_png(rgba, int(width), int(height), allocator)
+// capture_window captures a window as a PNG byte slice. The caller deletes
+// the result.
+capture_window :: proc(
+	hwnd: windows.HWND,
+	allocator := context.allocator,
+) -> (
+	result: []byte,
+	ok: bool,
+) {
+	rgba, width, height, pok := capture_pixels(hwnd, allocator)
+	if !pok {
+		return nil, false
+	}
+	defer delete(rgba, allocator)
+	return encode_png(rgba, width, height, allocator)
+}
+
+// capture_window_jpeg captures a window as a JPEG byte slice at the given
+// quality (0..100). The caller deletes the result.
+capture_window_jpeg :: proc(
+	hwnd: windows.HWND,
+	quality: int,
+	allocator := context.allocator,
+) -> (
+	result: []byte,
+	ok: bool,
+) {
+	rgba, width, height, pok := capture_pixels(hwnd, allocator)
+	if !pok {
+		return nil, false
+	}
+	defer delete(rgba, allocator)
+	return encode_jpeg(rgba, width, height, quality, allocator)
+}
+
+// encode_jpeg converts RGBA pixels to a JPEG byte slice via stb_image_write.
+encode_jpeg :: proc(
+	rgba: []u8,
+	width, height, quality: int,
+	allocator := context.allocator,
+) -> (
+	result: []byte,
+	ok: bool,
+) {
+	rgb, rerr := make([]u8, width * height * 3, allocator)
+	if rerr != nil {
+		return nil, false
+	}
+	defer delete(rgb, allocator)
+	for i in 0 ..< width * height {
+		rgb[i * 3 + 0] = rgba[i * 4 + 0]
+		rgb[i * 3 + 1] = rgba[i * 4 + 1]
+		rgb[i * 3 + 2] = rgba[i * 4 + 2]
+	}
+
+	// The output buffer is preallocated to one byte per pixel, far beyond
+	// what a screenshot JPEG needs at any quality; the callback writes into
+	// it at a running offset without allocating.
+	out, oerr := make([]u8, width * height, allocator)
+	if oerr != nil {
+		return nil, false
+	}
+	offset := 0
+	ctx := Jpeg_Ctx {
+		buf      = raw_data(out),
+		offset   = &offset,
+		capacity = len(out),
+	}
+	res := stbi.write_jpg_to_func(
+		jpeg_write_cb,
+		&ctx,
+		c.int(width),
+		c.int(height),
+		3,
+		raw_data(rgb),
+		c.int(quality),
+	)
+	if res == 0 || offset == 0 {
+		delete(out, allocator)
+		return nil, false
+	}
+	result = out[:offset]
+	return result, true
+}
+
+// Jpeg_Ctx carries the preallocated output buffer for the stb callback.
+Jpeg_Ctx :: struct {
+	buf:      [^]u8,
+	offset:   ^int,
+	capacity: int,
+}
+
+// jpeg_write_cb appends encoded bytes into the preallocated buffer. It is a
+// contextless C callback, so it must not allocate.
+jpeg_write_cb :: proc "c" (ctx: rawptr, data: rawptr, size: c.int) {
+	c := (^Jpeg_Ctx)(ctx)
+	src := ([^]u8)(data)
+	for i in 0 ..< int(size) {
+		if c.offset^ < c.capacity {
+			c.buf[c.offset^] = src[i]
+			c.offset^ += 1
+		}
+	}
 }
 
 // encode_png wraps RGBA pixel rows in a valid PNG file.

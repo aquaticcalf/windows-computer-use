@@ -6,6 +6,7 @@ import window "../../internal/window"
 import "core:fmt"
 import "core:os"
 import "core:strconv"
+import "core:strings"
 
 // VERSION is the semantic version of the CLI.
 VERSION :: "0.0.1"
@@ -134,7 +135,8 @@ run_state :: proc(args: []string) {
 	fmt.print(text)
 }
 
-// run_screenshot captures an app's window to a PNG file.
+// run_screenshot captures an app's window to a PNG or JPEG file. The format
+// is chosen by the output extension; --quality applies to JPEG only.
 run_screenshot :: proc(args: []string) {
 	if len(args) < 1 {
 		fmt.eprintln("wcu: screenshot requires an app (name, pid, or title)")
@@ -143,10 +145,19 @@ run_screenshot :: proc(args: []string) {
 
 	app_query := args[0]
 	out_path := "wcu.png"
+	quality := 85
 	for i := 1; i < len(args); i += 1 {
-		if args[i] == "--out" && i + 1 < len(args) {
-			out_path = args[i + 1]
-			i += 1
+		switch args[i] {
+		case "--out":
+			if i + 1 < len(args) {
+				out_path = args[i + 1]
+				i += 1
+			}
+		case "--quality":
+			if i + 1 < len(args) {
+				quality = parse_int(args[i + 1], quality)
+				i += 1
+			}
 		}
 	}
 
@@ -156,15 +167,23 @@ run_screenshot :: proc(args: []string) {
 		os.exit(1)
 	}
 
-	png, cok := capture.capture_window(hwnd)
-	if !cok {
+	lower := strings.to_lower(out_path)
+	is_jpeg := strings.has_suffix(lower, ".jpg") || strings.has_suffix(lower, ".jpeg")
+
+	data: []byte
+	if is_jpeg {
+		data, ok = capture.capture_window_jpeg(hwnd, quality)
+	} else {
+		data, ok = capture.capture_window(hwnd)
+	}
+	if !ok {
 		fmt.eprintln("wcu: failed to capture window")
 		os.exit(1)
 	}
-	defer delete(png)
+	defer delete(data)
 
-	if werr := os.write_entire_file(out_path, png); werr == nil {
-		fmt.printf("wrote %s (%d bytes)\n", out_path, len(png))
+	if werr := os.write_entire_file(out_path, data); werr == nil {
+		fmt.printf("wrote %s (%d bytes)\n", out_path, len(data))
 	} else {
 		fmt.eprintf("wcu: failed to write file (%v)\n", werr)
 		os.exit(1)
