@@ -9,9 +9,11 @@
 	"checker_args": "-vet -strict-style -vet-tabs -disallow-do -warnings-as-errors",
 	"checker_path": [
 		"cmd/wcu",
-		"internal/version",
-		"internal/win32",
+		"internal/input",
 		"internal/uia",
-		"internal/uia/binding"
+		"internal/uia/binding",
+		"internal/version",
+		"internal/window",
+		"internal/win32"
 	]
 }
