@@ -8,6 +8,7 @@ package arbiter
 // DESIGN.md.
 
 import "core:strings"
+import "core:sync"
 import "core:sys/windows"
 
 // Agent identifies a client that drives targets: an MCP session id, a CLI
@@ -383,4 +384,48 @@ router_run :: proc(e: Executor, agent: Agent, frame: Frame) -> Error {
 	updated := frame
 	updated.lane = lane
 	return slot.run(slot, agent, updated)
+}
+
+// set_lane installs an executor for a lane on the router. The SendInput lane
+// is automatically wrapped in the global lock, so a router configured through
+// set_lane can never bypass serialization of physical input. See DESIGN.md.
+set_lane :: proc(r: ^Router, lane: Lane, exec: Executor) {
+	installed := exec
+	if lane == .SendInput {
+		installed = sendinput_executor(installed)
+	}
+	r.lanes[lane] = installed
+}
+
+// global_sendinput_lock serializes every SendInput lane action process-wide.
+// The physical input stream is the one resource all agents share: two agents
+// must never interleave key down/up pairs or pointer moves. It is the only
+// lock in the arbiter; the parallel lanes (UIA, CDP, posted messages) never
+// touch it.
+global_sendinput_lock: sync.Mutex
+
+// SendInput_Wrapper holds the executor serialized behind the global SendInput
+// lock.
+SendInput_Wrapper :: struct {
+	inner: Executor,
+}
+
+// sendinput_executor wraps a lane executor so its frames run while holding
+// the process-wide SendInput lock. Every physical-input action must be
+// dispatched through an executor built by this procedure; no caller takes the
+// lock directly.
+sendinput_executor :: proc(inner: Executor, allocator := context.allocator) -> Executor {
+	w := new(SendInput_Wrapper, allocator)
+	w.inner = inner
+	return Executor{data = w, run = sendinput_run}
+}
+
+// sendinput_run runs frame on the wrapped executor while holding the global
+// SendInput lock, so concurrent agents never interleave physical input.
+sendinput_run :: proc(e: Executor, agent: Agent, frame: Frame) -> Error {
+	w := (^SendInput_Wrapper)(e.data)
+	if sync.mutex_guard(&global_sendinput_lock) {
+		return w.inner.run(w.inner, agent, frame)
+	}
+	return .None
 }
