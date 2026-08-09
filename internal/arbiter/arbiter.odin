@@ -52,6 +52,9 @@ Frame :: struct {
 	// text carries the string argument: typed text, a key spec, a value, or
 	// a match string for Wait_Until.
 	text:   string,
+	// batch groups frames pushed together so a failed frame drops the rest
+	// of its batch. Zero means the frame stands alone.
+	batch:  uint,
 }
 
 // Executor runs a frame on a lane. It is the seam behind which the real lane
@@ -73,11 +76,13 @@ Stack :: struct {
 // empty, usable arbiter; destroy releases its maps and queued frames.
 Arbiter :: struct {
 	// owners maps each claimed target to its exclusive agent.
-	owners: map[Target]Agent,
+	owners:     map[Target]Agent,
 	// stacks maps each agent to its pending frame queue.
-	stacks: map[Agent]^Stack,
+	stacks:     map[Agent]^Stack,
 	// paused marks agents whose execute calls do nothing.
-	paused: map[Agent]bool,
+	paused:     map[Agent]bool,
+	// next_batch is the next batch id handed out by push_batch.
+	next_batch: uint,
 }
 
 // Error is this package's error type.
@@ -99,6 +104,10 @@ Error :: enum {
 	Lane_Unavailable,
 	// No_Lane reports that no lane can serve the target.
 	No_Lane,
+	// Not_Met reports that a Wait_Until frame's condition was not satisfied.
+	Not_Met,
+	// Execution_Failed reports that a lane executor reported a failure.
+	Execution_Failed,
 }
 
 // destroy releases the arbiter's maps, queued frames, and stacks.
@@ -201,18 +210,52 @@ push :: proc(a: ^Arbiter, agent: Agent, frame: Frame) -> Error {
 	}
 	queued := frame
 	queued.text = strings.clone(frame.text)
+	append(&ensure_stack(a, agent).frames, queued)
+	return .None
+}
+
+// push_batch queues a group of frames for agent as one batch. The frames
+// share a batch id and run in order; when any frame in the batch fails, the
+// remaining batch frames are dropped so the batch fails fast instead of
+// acting on a state that did not materialize. All targets are claimed up
+// front, so a rejected claim appends nothing.
+push_batch :: proc(a: ^Arbiter, agent: Agent, frames: []Frame) -> Error {
+	if len(frames) == 0 {
+		return .None
+	}
+	for frame in frames {
+		if frame.target != nil {
+			if err := claim(a, agent, frame.target); err != .None {
+				return err
+			}
+		}
+	}
+	s := ensure_stack(a, agent)
+	a.next_batch += 1
+	id := a.next_batch
+	for frame in frames {
+		queued := frame
+		queued.batch = id
+		queued.text = strings.clone(frame.text)
+		append(&s.frames, queued)
+	}
+	return .None
+}
+
+// ensure_stack returns the agent's stack, creating it when the agent is new.
+ensure_stack :: proc(a: ^Arbiter, agent: Agent) -> ^Stack {
 	s := a.stacks[agent]
 	if s == nil {
 		s = new(Stack)
 		a.stacks[agent] = s
 	}
-	append(&s.frames, queued)
-	return .None
+	return s
 }
 
 // execute runs the agent's next queued frame on the given executor. The
 // frame is popped whether it succeeds or fails, so the queue can never stall
 // on a repeated failure. A paused agent keeps its queue and returns Paused.
+// When a batched frame fails, the rest of its batch is dropped.
 execute :: proc(a: ^Arbiter, exec: Executor, agent: Agent) -> Error {
 	assert(exec.run != nil)
 	if is_paused(a, agent) {
@@ -226,10 +269,36 @@ execute :: proc(a: ^Arbiter, exec: Executor, agent: Agent) -> Error {
 	defer delete(frame.text)
 	if frame.target != nil {
 		if owner, ok := a.owners[frame.target]; !ok || owner != agent {
+			if frame.batch != 0 {
+				drop_batch(a, agent, frame.batch)
+			}
 			return .Not_Owner
 		}
 	}
-	return exec.run(exec, agent, frame)
+	err := exec.run(exec, agent, frame)
+	if err != .None && frame.batch != 0 {
+		drop_batch(a, agent, frame.batch)
+	}
+	return err
+}
+
+// drop_batch removes every queued frame that belongs to the given batch,
+// freeing their text, so a failed batch never runs its remaining frames.
+drop_batch :: proc(a: ^Arbiter, agent: Agent, batch: uint) {
+	s := a.stacks[agent]
+	if s == nil {
+		return
+	}
+	kept := make([dynamic]Frame, 0, len(s.frames))
+	for frame in s.frames {
+		if frame.batch == batch {
+			delete(frame.text)
+		} else {
+			append(&kept, frame)
+		}
+	}
+	delete(s.frames)
+	s.frames = kept
 }
 
 // pause stops agent's queue from executing. Paused agents keep their pending
