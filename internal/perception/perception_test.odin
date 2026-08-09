@@ -54,6 +54,21 @@ test_state_and_text_of_shell_window :: proc(t: ^testing.T) {
 	// Text content may not be present on every element; it must not crash.
 	_, terr := perception_text(&s, hwnd)
 	_ = terr
+
+	// Deep-walk the shell window with a large budget. Regression for the NULL
+	// name BSTR crash: some providers return S_OK with a nil name, which the
+	// old code dereferenced.
+	deep_limits := Limits {
+		max_nodes  = 5000,
+		max_depth  = 64,
+		text_limit = 100,
+	}
+	deep, derr := state(&s, hwnd, deep_limits)
+	testing.expect(t, derr == .None)
+	if derr == .None {
+		testing.expect(t, len(deep) > 0)
+		delete(deep)
+	}
 }
 
 // perception_text is a thin wrapper so the test can call text without

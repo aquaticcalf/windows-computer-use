@@ -117,3 +117,15 @@ create_button :: proc() -> windows.HWND {
 		nil,
 	)
 }
+
+// Pure, COM-free: a nil BSTR must read as length zero, not crash. Some UIA
+// providers return S_OK with a nil name, which previously dereferenced null
+// and crashed deep walks.
+@(test)
+test_bstr_length_is_nil_safe :: proc(t: ^testing.T) {
+	testing.expect(t, bstr_length(nil) == 0)
+
+	// A real, non-empty BSTR still counts correctly.
+	buf := [3]u16{'a', 'b', 0}
+	testing.expect(t, bstr_length(&buf[0]) == 2)
+}

@@ -131,7 +131,7 @@ retain_element :: proc(el: Element) -> Element {
 // allocated with the supplied allocator; the caller deletes it.
 name :: proc(el: ^Element, allocator := context.allocator) -> (string, Error) {
 	bstr, hr := binding.element_name(el.ptr)
-	if hr != 0 {
+	if hr != 0 || bstr == nil {
 		return "", .Name_Unavailable
 	}
 	defer binding.free_bstr(bstr)
@@ -395,8 +395,12 @@ text :: proc(
 	return text, .None
 }
 
-// bstr_length counts the UTF-16 units in a null-terminated BSTR.
+// bstr_length counts the UTF-16 units in a null-terminated BSTR. A nil BSTR
+// is treated as length zero.
 bstr_length :: proc(b: windows.BSTR) -> int {
+	if b == nil {
+		return 0
+	}
 	chars := ([^]u16)(b)
 	length := 0
 	for chars[length] != 0 {
