@@ -18,8 +18,10 @@ Agent :: distinct string
 // arbiter never dereferences handles, so it stays testable with fake ids.
 Target :: windows.HWND
 
-// Lane names an input channel that executes frames.
+// Lane names an input channel that executes frames. Auto asks the router to
+// pick the best available lane for the frame.
 Lane :: enum {
+	Auto,
 	Uia,
 	Cdp,
 	Post,
@@ -92,6 +94,10 @@ Error :: enum {
 	Paused,
 	// Empty reports that the agent has no pending frames.
 	Empty,
+	// Lane_Unavailable reports that a requested lane cannot serve the target.
+	Lane_Unavailable,
+	// No_Lane reports that no lane can serve the target.
+	No_Lane,
 }
 
 // destroy releases the arbiter's maps, queued frames, and stacks.
@@ -275,4 +281,106 @@ pop_front :: proc(frames: ^[dynamic]Frame) -> Frame {
 	}
 	pop(frames)
 	return front
+}
+
+// Capabilities reports which input lanes can serve a target right now. The
+// zero value means no lane is available.
+Capabilities :: struct {
+	// uia reports that the target exposes a usable accessibility tree.
+	uia:        bool,
+	// cdp reports that the target is Chromium with an attached CDP session.
+	cdp:        bool,
+	// post reports that the target accepts classic posted window messages.
+	post:       bool,
+	// send_input reports that global pointer fallbacks are allowed for it.
+	send_input: bool,
+}
+
+// Capability_Probe reports which lanes can serve a target. Production fills
+// it from the real subsystems (UIA support, attached CDP sessions, window
+// class, the fallback gate); tests inject a fake. See DESIGN.md.
+Capability_Probe :: struct {
+	// data is opaque context for probe, set by the producer of the probe.
+	data:  rawptr,
+	// probe reports the lanes available for target.
+	probe: proc(data: rawptr, target: Target) -> Capabilities,
+}
+
+// LANE_PRIORITY is the fallback order when a frame does not request a lane:
+// UIA first (primary, no cursor), then CDP for attached Chromium, then posted
+// messages, then the globally serialized SendInput lane. Mirrors the action
+// preference order in ARCHITECTURE.md.
+LANE_PRIORITY :: [4]Lane{.Uia, .Cdp, .Post, .SendInput}
+
+// Router selects a lane for each frame by priority and dispatches the frame
+// to that lane's executor. It implements the arbiter's Executor seam, so
+// agents only ever push frames and the router decides which channel acts.
+Router :: struct {
+	// probe reports lane availability per target.
+	probe: Capability_Probe,
+	// lanes holds the executor for each concrete lane; the Auto slot is
+	// unused. A nil executor reports Lane_Unavailable.
+	lanes: [Lane]Executor,
+}
+
+// select returns the lane that should run frame. A frame requesting Auto uses
+// LANE_PRIORITY over the target's capabilities. A frame naming a specific
+// lane uses that lane when available and fails with Lane_Unavailable
+// otherwise. When no usable lane exists at all it fails with No_Lane.
+select :: proc(r: ^Router, frame: Frame) -> (Lane, Error) {
+	caps := r.probe.probe(r.probe.data, frame.target)
+	if frame.lane != .Auto {
+		if lane_available(caps, frame.lane) {
+			return frame.lane, .None
+		}
+		return .Auto, .Lane_Unavailable
+	}
+	for lane in LANE_PRIORITY {
+		if lane_available(caps, lane) {
+			return lane, .None
+		}
+	}
+	return .Auto, .No_Lane
+}
+
+// lane_available reports whether caps admits lane. Auto is never available on
+// its own; it only means "let the router choose".
+lane_available :: proc(caps: Capabilities, lane: Lane) -> bool {
+	switch lane {
+	case .Auto:
+		return false
+	case .Uia:
+		return caps.uia
+	case .Cdp:
+		return caps.cdp
+	case .Post:
+		return caps.post
+	case .SendInput:
+		return caps.send_input
+	case:
+		return false
+	}
+}
+
+// executor wraps the router as the arbiter's Executor seam, so it can be
+// passed straight to execute.
+executor :: proc(r: ^Router) -> Executor {
+	return Executor{data = r, run = router_run}
+}
+
+// router_run runs frame on the lane select chose for it, stamping the chosen
+// lane onto the frame so the lane executor knows how it was routed.
+router_run :: proc(e: Executor, agent: Agent, frame: Frame) -> Error {
+	r := (^Router)(e.data)
+	lane, err := select(r, frame)
+	if err != .None {
+		return err
+	}
+	slot := r.lanes[lane]
+	if slot.run == nil {
+		return .Lane_Unavailable
+	}
+	updated := frame
+	updated.lane = lane
+	return slot.run(slot, agent, updated)
 }
