@@ -433,6 +433,46 @@ state :: proc(
 	return render(nodes, limits, match, node_range, allocator)
 }
 
+// state_poll renders a window's tree, retrying up to attempts times with a
+// delay between each try until the tree is non-empty. Chromium apps expose
+// their tree asynchronously, so wake (passed in) followed by a short poll
+// avoids returning an empty snapshot. The caller deletes the returned string.
+state_poll :: proc(
+	s: ^Session,
+	hwnd: windows.HWND,
+	limits: Limits,
+	wake: proc(hwnd: windows.HWND),
+	attempts: int = 10,
+	delay_ms: u32 = 300,
+	match: string = "",
+	node_range: Node_Range = {},
+	allocator := context.allocator,
+) -> (
+	string,
+	Error,
+) {
+	for i in 0 ..< attempts {
+		if i > 0 {
+			wake(hwnd)
+			windows.Sleep(delay_ms)
+		}
+		text, err := state(s, hwnd, limits, match, node_range, allocator)
+		if err != .None {
+			return "", err
+		}
+		// A match or range can legitimately be empty; only poll when the full
+		// tree itself produced no nodes.
+		if match == "" && node_range.count == 0 {
+			if len(text) > 0 {
+				return text, .None
+			}
+		} else {
+			return text, .None
+		}
+	}
+	return "", .None
+}
+
 // text reads up to max_length characters of text content from the window.
 // The caller deletes the returned string.
 text :: proc(

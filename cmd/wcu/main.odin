@@ -140,7 +140,16 @@ run_state :: proc(args: []string) {
 	}
 	defer perception.close(&session)
 
-	text, terr := perception.state(&session, hwnd, limits, match, node_range)
+	text, terr := perception.state_poll(
+		&session,
+		hwnd,
+		limits,
+		wake_hwnd,
+		10,
+		300,
+		match,
+		node_range,
+	)
 	if terr != .None {
 		fmt.eprintln("wcu: failed to read app state")
 		os.exit(1)
@@ -333,36 +342,108 @@ parse_method :: proc(s: string) -> actions.Method {
 	return .Auto
 }
 
-// run_type types text into the target window.
+// run_type types text into the target window. With --verify it re-reads the
+// window title after typing and fails loudly if it did not change.
 run_type :: proc(args: []string) {
 	if len(args) < 2 {
 		fmt.eprintln("wcu: type requires an app (name, pid, or title) and text")
 		os.exit(2)
 	}
-	hwnd := resolve_app(args[0])
-	text := strings.join(args[1:], " ")
+	app_query := args[0]
+	verify := false
+	text_parts := make([dynamic]string, 0, 8)
+	for i := 1; i < len(args); i += 1 {
+		if args[i] == "--verify" {
+			verify = true
+			continue
+		}
+		append(&text_parts, args[i])
+	}
+	hwnd := resolve_app(app_query)
+	text := strings.join(text_parts[:], " ")
+	delete(text_parts)
 	defer delete(text)
 
-	err := actions.type_text(hwnd, text)
-	if err != .None {
-		action_fail("type failed", err)
+	if verify {
+		before := window_state_text(hwnd)
+		err := actions.type_text(hwnd, text)
+		if err != .None {
+			action_fail("type failed", err)
+		}
+		windows.Sleep(150)
+		after := window_state_text(hwnd)
+		changed := before != after
+		delete(before)
+		delete(after)
+		if !changed {
+			action_fail("type --verify: window did not change after typing", .Action_Failed)
+		}
+	} else {
+		err := actions.type_text(hwnd, text)
+		if err != .None {
+			action_fail("type failed", err)
+		}
 	}
 	show_snapshot(hwnd)
 }
 
-// run_key presses an xdotool-style key spec into the target window.
+// window_state_text renders a window's state tree as text, or "" on failure.
+// Used to detect whether an action changed the target's content.
+window_state_text :: proc(hwnd: windows.HWND) -> string {
+	session, serr := perception.open()
+	if serr != .None {
+		return ""
+	}
+	defer perception.close(&session)
+	text, terr := perception.state(&session, hwnd, perception.default_limits())
+	if terr != .None {
+		return ""
+	}
+	return text
+}
+
+// run_key presses an xdotool-style key spec into the target window. With
+// --verify it re-reads the window title after pressing and fails loudly if it
+// did not change.
 run_key :: proc(args: []string) {
 	if len(args) < 2 {
 		fmt.eprintln("wcu: key requires an app (name, pid, or title) and keys (e.g. ctrl+s)")
 		os.exit(2)
 	}
-	hwnd := resolve_app(args[0])
-	spec := strings.join(args[1:], " ")
+	app_query := args[0]
+	verify := false
+	spec_parts := make([dynamic]string, 0, 8)
+	for i := 1; i < len(args); i += 1 {
+		if args[i] == "--verify" {
+			verify = true
+			continue
+		}
+		append(&spec_parts, args[i])
+	}
+	hwnd := resolve_app(app_query)
+	spec := strings.join(spec_parts[:], " ")
+	delete(spec_parts)
 	defer delete(spec)
 
-	err := actions.press_key(hwnd, spec)
-	if err != .None {
-		action_fail("key failed", err)
+	if verify {
+		before := window_state_text(hwnd)
+		err := actions.press_key(hwnd, spec)
+		if err != .None {
+			action_fail("key failed", err)
+		}
+		windows.Sleep(150)
+		after := window_state_text(hwnd)
+		changed := before != after
+		delete(before)
+		delete(after)
+		if !changed {
+			action_fail("key --verify: window did not change after keypress", .Action_Failed)
+		}
+	} else {
+		err := actions.press_key(hwnd, spec)
+		if err != .None {
+			action_fail("key failed", err)
+		}
 	}
 	show_snapshot(hwnd)
 }
@@ -566,7 +647,16 @@ show_snapshot :: proc(hwnd: windows.HWND, node_range: perception.Node_Range = {}
 		}
 	}
 
-	text, terr := perception.state(&session, hwnd, perception.default_limits(), "", snapshot_range)
+	text, terr := perception.state_poll(
+		&session,
+		hwnd,
+		perception.default_limits(),
+		wake_hwnd,
+		10,
+		300,
+		"",
+		snapshot_range,
+	)
 	if terr != .None {
 		fmt.eprintln("wcu: failed to read app state")
 		os.exit(1)
@@ -575,6 +665,13 @@ show_snapshot :: proc(hwnd: windows.HWND, node_range: perception.Node_Range = {}
 
 	fmt.println("--- snapshot ---")
 	fmt.print(text)
+}
+
+// wake_hwnd sends WM_GETOBJECT to a window and its children, prompting
+// Chromium apps to materialize their tree. Used as the wake callback for
+// state_poll.
+wake_hwnd :: proc(hwnd: windows.HWND) {
+	window.wake(hwnd)
 }
 
 // print_help writes usage text for every command to stdout.
@@ -588,8 +685,8 @@ print_help :: proc() {
 	fmt.println("  list_apps                  List running apps and windows")
 	fmt.println("  state <app> [--match S] [--nodes N or N-M]  Render an app UI tree as text")
 	fmt.println("  click <app> [--index I | --name N | --x X --y Y] [--method auto|uia|sendinput]")
-	fmt.println("  type <app> <text>          Type text into the target")
-	fmt.println("  key <app> <keys>           Press keys (e.g. ctrl+s)")
+	fmt.println("  type <app> <text> [--verify]  Type text into the target")
+	fmt.println("  key <app> <keys> [--verify]   Press keys (e.g. ctrl+s)")
 	fmt.println("  scroll <app> --index I --dir up|down|left|right [--pages N]")
 	fmt.println("  set_value <app> --index I --value <v>")
 	fmt.println("  focus <app>                Bring a window to the foreground")

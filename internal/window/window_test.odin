@@ -3,6 +3,7 @@ package window
 import "../win32"
 import "core:fmt"
 import "core:strings"
+import "core:sys/windows"
 import "core:testing"
 
 @(test)
@@ -126,4 +127,35 @@ test_contains_ci :: proc(t: ^testing.T) {
 	testing.expect(t, contains_ci("Program Manager", "MANAGER"))
 	testing.expect(t, contains_ci("Slack - Workspace", "slack"))
 	testing.expect(t, !contains_ci("abc", "xyz"))
+}
+
+@(test)
+test_valid_detects_live_and_stale_handles :: proc(t: ^testing.T) {
+	shell := win32.GetShellWindow()
+	testing.expect(t, shell != nil)
+	testing.expect(t, valid(shell))
+
+	// A destroyed window's handle must read as stale.
+	class_buf: [16]u16
+	class := windows.utf8_to_wstring_buf(class_buf[:], "STATIC")
+	hwnd := windows.CreateWindowExW(
+		0,
+		class,
+		nil,
+		0x40000000, // WS_CHILD
+		0,
+		0,
+		1,
+		1,
+		shell,
+		nil,
+		nil,
+		nil,
+	)
+	testing.expect(t, hwnd != nil)
+	if hwnd != nil {
+		testing.expect(t, valid(hwnd))
+		windows.DestroyWindow(hwnd)
+		testing.expect(t, !valid(hwnd))
+	}
 }

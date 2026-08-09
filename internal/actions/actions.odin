@@ -27,6 +27,9 @@ Error :: enum {
 	Action_Failed,
 	// Focus_Failed reports that the target window could not be foregrounded.
 	Focus_Failed,
+	// Stale_Handle reports that the target window handle no longer names a
+	// live window; re-resolve the target before retrying.
+	Stale_Handle,
 	// Key_Parse_Failed reports that a key spec could not be parsed.
 	Key_Parse_Failed,
 }
@@ -69,6 +72,16 @@ close :: proc(s: ^Session) {
 	perception.close(&s.perception)
 }
 
+// check_target reports a Stale_Handle error when hwnd no longer names a live
+// window, so callers get a clear message instead of a confusing downstream
+// failure.
+check_target :: proc(hwnd: windows.HWND) -> Error {
+	if window.valid(hwnd) {
+		return .None
+	}
+	return .Stale_Handle
+}
+
 // element_at_index resolves the element at the given walk index for a window
 // handle. The caller releases the returned element with uia.release_element.
 element_at_index :: proc(
@@ -103,6 +116,9 @@ click_name :: proc(
 	method: Method,
 	limits: perception.Limits,
 ) -> Error {
+	if e := check_target(hwnd); e != .None {
+		return e
+	}
 	root, err := uia.element_from_handle(&s.perception.auto, hwnd)
 	if err != .None {
 		return .Index_Out_Of_Range
@@ -140,6 +156,9 @@ click_index :: proc(
 	method: Method,
 	limits: perception.Limits,
 ) -> Error {
+	if e := check_target(hwnd); e != .None {
+		return e
+	}
 	el, err := element_at_index(s, hwnd, index, limits)
 	if err != .None {
 		return err
@@ -176,6 +195,9 @@ click_rect_center :: proc(hwnd: windows.HWND, el: ^uia.Element) -> Error {
 
 // click_xy clicks at absolute screen coordinates via SendInput.
 click_xy :: proc(hwnd: windows.HWND, x, y: i32) -> Error {
+	if e := check_target(hwnd); e != .None {
+		return e
+	}
 	if !window.force_foreground(hwnd) {
 		return .Focus_Failed
 	}
@@ -186,6 +208,9 @@ click_xy :: proc(hwnd: windows.HWND, x, y: i32) -> Error {
 // type_text focuses the target window, then sends the text as Unicode
 // keyboard events.
 type_text :: proc(hwnd: windows.HWND, text: string) -> Error {
+	if e := check_target(hwnd); e != .None {
+		return e
+	}
 	if !window.force_foreground(hwnd) {
 		return .Focus_Failed
 	}
@@ -196,6 +221,9 @@ type_text :: proc(hwnd: windows.HWND, text: string) -> Error {
 // press_key parses an xdotool-style key spec and presses the chord(s) into
 // the focused target window.
 press_key :: proc(hwnd: windows.HWND, spec: string) -> Error {
+	if e := check_target(hwnd); e != .None {
+		return e
+	}
 	combos, perr := parse_keys(spec)
 	if perr != "" {
 		return .Key_Parse_Failed
@@ -239,6 +267,9 @@ scroll_index :: proc(
 	pages: int,
 	limits: perception.Limits,
 ) -> Error {
+	if e := check_target(hwnd); e != .None {
+		return e
+	}
 	el, err := element_at_index(s, hwnd, index, limits)
 	if err != .None {
 		return err
@@ -307,6 +338,9 @@ set_value_index :: proc(
 	value: string,
 	limits: perception.Limits,
 ) -> Error {
+	if e := check_target(hwnd); e != .None {
+		return e
+	}
 	el, err := element_at_index(s, hwnd, index, limits)
 	if err != .None {
 		return err
@@ -317,6 +351,9 @@ set_value_index :: proc(
 
 // focus brings a window to the foreground and verifies it is active.
 focus :: proc(hwnd: windows.HWND) -> Error {
+	if e := check_target(hwnd); e != .None {
+		return e
+	}
 	if window.force_foreground(hwnd) {
 		return .None
 	}
@@ -326,6 +363,9 @@ focus :: proc(hwnd: windows.HWND) -> Error {
 // wake sends WM_GETOBJECT to a window and all of its children so Chromium
 // apps materialize their accessibility tree.
 wake :: proc(hwnd: windows.HWND) -> Error {
+	if e := check_target(hwnd); e != .None {
+		return e
+	}
 	if window.wake(hwnd) > 0 {
 		return .None
 	}

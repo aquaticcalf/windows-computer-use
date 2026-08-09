@@ -204,6 +204,13 @@ title :: proc(hwnd: windows.HWND, allocator := context.allocator) -> string {
 	return title_of(hwnd, allocator)
 }
 
+// valid reports whether a window handle still names a live window. Handles go
+// stale when an app closes or recreates its window; callers should re-resolve
+// before acting when this returns false.
+valid :: proc(hwnd: windows.HWND) -> bool {
+	return bool(windows.IsWindow(hwnd))
+}
+
 // rect returns a window's bounding rectangle in screen coordinates.
 rect :: proc(hwnd: windows.HWND) -> (Rect, bool) {
 	r: windows.RECT
