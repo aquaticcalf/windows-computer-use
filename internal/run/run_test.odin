@@ -41,5 +41,21 @@ test_run_module_surface :: proc(t: ^testing.T) {
 	testing.expect(t, long.Timed_Out)
 	destroy(&long)
 
+	// A builtin (echo) is auto-wrapped in cmd /c.
+	builtin := run_command("echo auto-wrapped")
+	testing.expect(t, builtin.Started)
+	testing.expect(t, builtin.Exit_Code == 0)
+	testing.expect(t, strings.contains(builtin.Stdout, "auto-wrapped"))
+	destroy(&builtin)
+
+	// A real executable is not wrapped.
+	direct := prepare_command("C:/Windows/System32/whoami.exe")
+	testing.expect(t, strings.has_prefix(direct, "C:/Windows/System32/whoami.exe"))
+	delete(direct)
+
+	wrapped := prepare_command("echo hi")
+	testing.expect(t, strings.has_prefix(wrapped, "cmd /c "))
+	delete(wrapped)
+
 	set_approved_for_test(false)
 }

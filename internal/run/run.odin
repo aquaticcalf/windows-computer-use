@@ -30,6 +30,97 @@ destroy :: proc(r: ^Result) {
 	delete(r.Stderr)
 }
 
+// prepare_command returns the actual command line to launch. Commands whose
+// first token is a cmd builtin or an unknown name are wrapped in "cmd /c" so
+// things like "echo hi" work without the caller spelling it out. The returned
+// string is allocated on the given allocator; callers delete it.
+prepare_command :: proc(command: string, allocator := context.allocator) -> string {
+	token := first_token(command)
+	if token == "" {
+		return strings.clone(command, allocator)
+	}
+	if is_builtin(token) {
+		return strings.concatenate({"cmd /c ", command}, allocator)
+	}
+	return strings.clone(command, allocator)
+}
+
+// first_token returns the first whitespace-delimited token of a command line.
+first_token :: proc(command: string) -> string {
+	for i in 0 ..< len(command) {
+		if command[i] == ' ' || command[i] == '\t' {
+			return command[:i]
+		}
+	}
+	return command
+}
+
+// builtin_tokens lists cmd builtins that are not standalone executables.
+builtin_tokens := []string {
+	"echo",
+	"dir",
+	"cd",
+	"type",
+	"copy",
+	"move",
+	"del",
+	"rmdir",
+	"mkdir",
+	"set",
+	"cls",
+	"ver",
+	"time",
+	"date",
+	"prompt",
+	"path",
+	"title",
+	"color",
+	"pause",
+	"exit",
+	"if",
+	"for",
+	"call",
+	"rem",
+	"pushd",
+	"popd",
+	"shift",
+	"goto",
+	"start",
+	"taskkill",
+	"tasklist",
+}
+
+// is_builtin reports whether a token is a cmd builtin, case-insensitively.
+is_builtin :: proc(token: string) -> bool {
+	for b in builtin_tokens {
+		if ci_eq(token, b) {
+			return true
+		}
+	}
+	return false
+}
+
+// ci_eq compares two short ASCII strings case-insensitively.
+ci_eq :: proc(a, b: string) -> bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i in 0 ..< len(a) {
+		if ascii_lower(a[i]) != ascii_lower(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// ascii_lower lowercases an ASCII byte.
+ascii_lower :: proc(c: byte) -> byte {
+	if 'A' <= c && c <= 'Z' {
+		return c + ('a' - 'A')
+	}
+	return c
+}
+
 // run_command starts the given command line with its standard output and
 // error piped back, waits up to timeout_ms, and returns the captured output.
 // The caller owns the returned strings and frees them with destroy.
@@ -38,8 +129,11 @@ run_command :: proc(
 	timeout_ms: u32 = 30_000,
 	allocator := context.allocator,
 ) -> Result {
+	cmd_line := prepare_command(command, allocator)
+	defer delete(cmd_line, allocator)
+
 	cmd_wide: [1024]u16
-	cmd_ptr := windows.utf8_to_wstring_buf(cmd_wide[:], command)
+	cmd_ptr := windows.utf8_to_wstring_buf(cmd_wide[:], cmd_line)
 
 	out_read, out_write: windows.HANDLE
 	err_read, err_write: windows.HANDLE
