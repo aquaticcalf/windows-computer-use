@@ -1,6 +1,7 @@
 package window
 
 import "../win32"
+import "core:fmt"
 import "core:strconv"
 import "core:strings"
 import "core:sys/windows"
@@ -15,6 +16,10 @@ Window :: struct {
 	title:   string,
 	pid:     u32,
 	visible: bool,
+	// Id is a stable identifier for this window: the pid when unique, or
+	// "pid.index" when a process owns several top-level windows. It survives
+	// title changes, unlike matching on title text.
+	id:      string,
 }
 
 // Rect is an axis-aligned rectangle in screen coordinates.
@@ -54,7 +59,45 @@ list :: proc(allocator := context.allocator) -> (result: []Window, ok: bool) {
 			visible = bool(windows.IsWindowVisible(hwnd)),
 		}
 	}
+	assign_ids(rows, allocator)
 	return result, true
+}
+
+// assign_ids stamps each window with a stable id: the bare pid when a process
+// owns exactly one top-level window, otherwise "pid.index" for the Nth window
+// of that process.
+assign_ids :: proc(rows: []Window, allocator := context.allocator) {
+	for i in 0 ..< len(rows) {
+		if pid_window_count(rows, rows[i].pid) == 1 {
+			rows[i].id = fmt.aprintf("%d", rows[i].pid, allocator = allocator)
+		} else {
+			index := pid_window_index(rows, i, rows[i].pid)
+			rows[i].id = fmt.aprintf("%d.%d", rows[i].pid, index, allocator = allocator)
+		}
+	}
+}
+
+// pid_window_count returns how many rows belong to the given process.
+pid_window_count :: proc(rows: []Window, pid: u32) -> int {
+	count := 0
+	for w in rows {
+		if w.pid == pid {
+			count += 1
+		}
+	}
+	return count
+}
+
+// pid_window_index returns the position of rows[i] among the windows of its
+// own process (0-based), which anchors the ".index" part of the id.
+pid_window_index :: proc(rows: []Window, i: int, pid: u32) -> int {
+	index := 0
+	for j in 0 ..< i {
+		if rows[j].pid == pid {
+			index += 1
+		}
+	}
+	return index
 }
 
 // find returns the first window whose title contains the given substring.
@@ -67,15 +110,20 @@ find :: proc(windows_: []Window, substring: string) -> (Window, bool) {
 	return {}, false
 }
 
-// resolve finds a top-level window for an app query. The query is either a
-// numeric pid or a case-insensitive substring of a window title. Returns nil
-// when nothing matches.
+// resolve finds a top-level window for an app query. The query is either an
+// internal window id ("1234" or "1234.2"), a numeric pid, or a
+// case-insensitive substring of a window title. Returns nil when nothing
+// matches.
 resolve :: proc(app_query: string, allocator := context.allocator) -> (windows.HWND, bool) {
 	rows, listed := list(allocator)
 	if !listed {
 		return nil, false
 	}
 	defer destroy(rows, allocator)
+
+	if id_match, id_ok := resolve_by_id(rows, app_query); id_ok {
+		return id_match, true
+	}
 
 	if pid, parsed := strconv.parse_u64(app_query, 10); parsed {
 		for w in rows {
@@ -88,6 +136,21 @@ resolve :: proc(app_query: string, allocator := context.allocator) -> (windows.H
 
 	for w in rows {
 		if contains_ci(w.title, app_query) {
+			return w.handle, true
+		}
+	}
+	return nil, false
+}
+
+// resolve_by_id matches a window id ("1234" or "1234.2") against the id
+// stamped by assign_ids. Bare ids are accepted for single-window processes;
+// dotted ids pick the Nth window of a process.
+resolve_by_id :: proc(rows: []Window, query: string) -> (windows.HWND, bool) {
+	if len(query) == 0 {
+		return nil, false
+	}
+	for w in rows {
+		if w.id == query {
 			return w.handle, true
 		}
 	}
@@ -126,10 +189,12 @@ to_lower :: proc(b: byte) -> byte {
 	return b
 }
 
-// destroy frees a window list produced by list, including its title strings.
+// destroy frees a window list produced by list, including its title and id
+// strings.
 destroy :: proc(windows_: []Window, allocator := context.allocator) {
 	for w in windows_ {
 		delete(w.title, allocator)
+		delete(w.id, allocator)
 	}
 	delete(windows_, allocator)
 }

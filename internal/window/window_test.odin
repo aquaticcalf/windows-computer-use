@@ -2,6 +2,7 @@ package window
 
 import "../win32"
 import "core:fmt"
+import "core:strings"
 import "core:testing"
 
 @(test)
@@ -66,6 +67,57 @@ test_resolve_by_title_and_pid :: proc(t: ^testing.T) {
 			_ = by_pid
 		}
 	}
+}
+
+@(test)
+test_window_ids_are_stable_and_resolvable :: proc(t: ^testing.T) {
+	rows, lok := list()
+	testing.expect(t, lok)
+	if !lok {
+		return
+	}
+	defer destroy(rows)
+	testing.expect(t, len(rows) > 0)
+
+	// Every window has a non-empty id.
+	for w in rows {
+		testing.expect(t, len(w.id) > 0)
+	}
+
+	// ids are unique across the list.
+	for i in 0 ..< len(rows) {
+		for j in i + 1 ..< len(rows) {
+			testing.expect(t, rows[i].id != rows[j].id)
+		}
+	}
+
+	// Resolving a row by its id returns the same window handle.
+	for w in rows {
+		hwnd, rok := resolve(w.id)
+		testing.expect(t, rok)
+		testing.expect(t, hwnd == w.handle)
+	}
+}
+
+@(test)
+test_assign_ids_marks_multi_window_processes :: proc(t: ^testing.T) {
+	rows, lok := list()
+	testing.expect(t, lok)
+	if !lok {
+		return
+	}
+	defer destroy(rows)
+
+	// Find a process with multiple windows and confirm the dotted ids.
+	saw_dotted := false
+	for w in rows {
+		if strings.contains(w.id, ".") {
+			saw_dotted = true
+		}
+	}
+	// Windows is full of multi-window processes (explorer, IME, ...); if none
+	// appeared the id assignment is broken.
+	testing.expect(t, saw_dotted)
 }
 
 @(test)

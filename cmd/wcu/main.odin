@@ -71,7 +71,7 @@ stub :: proc(command: string) {
 	fmt.eprintf("wcu: '%s' is not implemented yet (tracked on the project board).\n", command)
 }
 
-// run_list_apps prints every top-level window as a table.
+// run_list_apps prints every top-level window as a table with stable IDs.
 run_list_apps :: proc() {
 	rows, ok := window.list()
 	if !ok {
@@ -80,9 +80,9 @@ run_list_apps :: proc() {
 	}
 	defer window.destroy(rows)
 
-	fmt.println("HANDLE     PID   VIS  TITLE")
+	fmt.println("ID        HANDLE     PID   VIS  TITLE")
 	for w in rows {
-		fmt.printf("%08x  %5d  %v  %s\n", uintptr(w.handle), w.pid, w.visible, w.title)
+		fmt.printf("%-9s %08x  %5d  %v  %s\n", w.id, uintptr(w.handle), w.pid, w.visible, w.title)
 	}
 }
 
