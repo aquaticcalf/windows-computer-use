@@ -94,6 +94,7 @@ run_state :: proc(args: []string) {
 
 	app_query := args[0]
 	limits := perception.default_limits()
+	match := ""
 	for i := 1; i < len(args); i += 1 {
 		switch args[i] {
 		case "--max-nodes":
@@ -109,6 +110,11 @@ run_state :: proc(args: []string) {
 		case "--text-limit":
 			if i + 1 < len(args) {
 				limits.text_limit = parse_int(args[i + 1], limits.text_limit)
+				i += 1
+			}
+		case "--match":
+			if i + 1 < len(args) {
+				match = args[i + 1]
 				i += 1
 			}
 		}
@@ -127,7 +133,7 @@ run_state :: proc(args: []string) {
 	}
 	defer perception.close(&session)
 
-	text, terr := perception.state(&session, hwnd, limits)
+	text, terr := perception.state(&session, hwnd, limits, match)
 	if terr != .None {
 		fmt.eprintln("wcu: failed to read app state")
 		os.exit(1)
@@ -226,6 +232,7 @@ run_click :: proc(args: []string) {
 
 	app_query := args[0]
 	index := -1
+	name := ""
 	x, y: i32 = -1, -1
 	has_xy := false
 	method := actions.Method.Auto
@@ -234,6 +241,11 @@ run_click :: proc(args: []string) {
 		case "--index":
 			if i + 1 < len(args) {
 				index = parse_int(args[i + 1], -1)
+				i += 1
+			}
+		case "--name":
+			if i + 1 < len(args) {
+				name = args[i + 1]
 				i += 1
 			}
 		case "--x":
@@ -268,8 +280,10 @@ run_click :: proc(args: []string) {
 		err = actions.click_xy(hwnd, x, y)
 	} else if index >= 0 {
 		err = actions.click_index(&session, hwnd, index, method, perception.default_limits())
+	} else if name != "" {
+		err = actions.click_name(&session, hwnd, name, method, perception.default_limits())
 	} else {
-		fmt.eprintln("wcu: click requires --index I or --x X --y Y")
+		fmt.eprintln("wcu: click requires --index I, --name N, or --x X --y Y")
 		os.exit(2)
 	}
 	if err != .None {
@@ -481,8 +495,8 @@ print_help :: proc() {
 	fmt.println()
 	fmt.println("COMMANDS")
 	fmt.println("  list_apps                  List running apps and windows")
-	fmt.println("  state <app>                Render an app UI tree as text")
-	fmt.println("  click <app> [--index I | --x X --y Y] [--method auto|uia|sendinput]")
+	fmt.println("  state <app> [--match S]    Render an app UI tree as text")
+	fmt.println("  click <app> [--index I | --name N | --x X --y Y] [--method auto|uia|sendinput]")
 	fmt.println("  type <app> <text>          Type text into the target")
 	fmt.println("  key <app> <keys>           Press keys (e.g. ctrl+s)")
 	fmt.println("  scroll <app> --index I --dir up|down|left|right [--pages N]")

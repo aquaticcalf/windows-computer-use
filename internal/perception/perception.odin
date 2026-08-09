@@ -245,10 +245,117 @@ find_visit :: proc(el: ^uia.Element, depth: int, data: rawptr) -> bool {
 	return true
 }
 
-// render converts node records into a compact text tree with indices.
-render :: proc(nodes: []Node, limits: Limits, allocator := context.allocator) -> (string, Error) {
+// element_by_name returns the first element whose accessible name contains
+// the given substring (case-insensitive, ASCII). The returned element carries
+// an extra reference; the caller releases it with uia.release_element. Errors
+// with .Element_Unavailable when nothing matches.
+element_by_name :: proc(
+	s: ^Session,
+	root: ^uia.Element,
+	substring: string,
+	limits: Limits,
+	allocator := context.allocator,
+) -> (
+	uia.Element,
+	Error,
+) {
+	ctx := name_context {
+		needle    = substring,
+		count     = 0,
+		allocator = allocator,
+	}
+	traverse(s, root, 0, limits, name_visit, &ctx)
+	if !ctx.found {
+		return {}, .Element_Unavailable
+	}
+	return ctx.result, .None
+}
+
+// name_context carries the search state for element_by_name. It embeds
+// traverse_state so traverse can read the shared node counter.
+name_context :: struct {
+	using _:   traverse_state,
+	needle:    string,
+	found:     bool,
+	result:    uia.Element,
+	allocator: mem.Allocator,
+}
+
+// name_visit returns the first element whose name contains the needle.
+name_visit :: proc(el: ^uia.Element, depth: int, data: rawptr) -> bool {
+	ctx := (^name_context)(data)
+
+	name, _ := uia.name(el, ctx.allocator)
+	defer delete(name, ctx.allocator)
+	if len(name) > 0 && contains_ci(name, ctx.needle) {
+		ctx.result = uia.retain_element(el^)
+		ctx.found = true
+		return false
+	}
+	ctx.count += 1
+	return true
+}
+
+// contains_ci reports whether hay contains needle, case-insensitively, for
+// ASCII text.
+contains_ci :: proc(hay, needle: string) -> bool {
+	if len(needle) == 0 {
+		return true
+	}
+	if len(hay) < len(needle) {
+		return false
+	}
+	for i in 0 ..= len(hay) - len(needle) {
+		match := true
+		for j in 0 ..< len(needle) {
+			if ascii_lower(hay[i + j]) != ascii_lower(needle[j]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// ascii_lower lowercases an ASCII byte.
+ascii_lower :: proc(c: byte) -> byte {
+	if 'A' <= c && c <= 'Z' {
+		return c + ('a' - 'A')
+	}
+	return c
+}
+
+// render converts node records into a compact text tree with indices. When
+// match is non-empty, only nodes whose name, role, or value contains it
+// (case-insensitively) are emitted; parent lines are shown collapsed so the
+// caller still sees the tree shape around a match.
+render :: proc(
+	nodes: []Node,
+	limits: Limits,
+	match: string = "",
+	allocator := context.allocator,
+) -> (
+	string,
+	Error,
+) {
 	builder := strings.builder_make(allocator)
+	last_shown := -1
 	for n in nodes {
+		keep :=
+			match == "" ||
+			contains_ci(n.name, match) ||
+			contains_ci(n.role, match) ||
+			contains_ci(n.value, match)
+		if !keep {
+			continue
+		}
+
+		if match != "" && n.index - last_shown > 1 {
+			strings.write_string(&builder, "...\n")
+		}
 		for _ in 0 ..< n.depth {
 			strings.write_string(&builder, "  ")
 		}
@@ -271,16 +378,19 @@ render :: proc(nodes: []Node, limits: Limits, allocator := context.allocator) ->
 			fmt.sbprintf(&builder, " value=%q", value)
 		}
 		strings.write_string(&builder, "\n")
+		last_shown = n.index
 	}
 	return strings.to_string(builder), .None
 }
 
 // state renders the accessibility tree of the window with the given handle.
-// The caller deletes the returned string.
+// When match is non-empty, only matching nodes are shown. The caller deletes
+// the returned string.
 state :: proc(
 	s: ^Session,
 	hwnd: windows.HWND,
 	limits: Limits,
+	match: string = "",
 	allocator := context.allocator,
 ) -> (
 	string,
@@ -298,7 +408,7 @@ state :: proc(
 	}
 	defer destroy_nodes(nodes, allocator)
 
-	return render(nodes, limits, allocator)
+	return render(nodes, limits, match, allocator)
 }
 
 // text reads up to max_length characters of text content from the window.

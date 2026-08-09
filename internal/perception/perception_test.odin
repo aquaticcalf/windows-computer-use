@@ -31,6 +31,13 @@ test_state_and_text_of_shell_window :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(text, "Program"))
 	delete(text)
 
+	// The --match filter keeps only lines containing the needle.
+	matched, merr := state(&s, hwnd, limits, "Recycle")
+	testing.expect(t, merr == .None)
+	testing.expect(t, strings.contains(matched, "Recycle Bin"))
+	testing.expect(t, !strings.contains(matched, "Program Manager"))
+	delete(matched)
+
 	// Text content may not be present on every element; it must not crash.
 	_, terr := perception_text(&s, hwnd)
 	_ = terr

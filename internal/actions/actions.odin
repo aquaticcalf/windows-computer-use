@@ -19,6 +19,8 @@ Error :: enum {
 	Create_Failed,
 	// Index_Out_Of_Range reports that no element exists at the requested index.
 	Index_Out_Of_Range,
+	// Element_Not_Found reports that no element matched the requested name.
+	Element_Not_Found,
 	// Pattern_Not_Available reports that the element does not support the needed pattern.
 	Pattern_Not_Available,
 	// Action_Failed reports that the underlying action returned an error.
@@ -89,6 +91,44 @@ element_at_index :: proc(
 		return {}, .Index_Out_Of_Range
 	}
 	return el, .None
+}
+
+// click_name clicks the first element whose accessible name contains the
+// given substring. The method selects whether to use Invoke, a SendInput
+// rect-center click, or both.
+click_name :: proc(
+	s: ^Session,
+	hwnd: windows.HWND,
+	name: string,
+	method: Method,
+	limits: perception.Limits,
+) -> Error {
+	root, err := uia.element_from_handle(&s.perception.auto, hwnd)
+	if err != .None {
+		return .Index_Out_Of_Range
+	}
+	defer uia.release_element(&root)
+
+	el, perr := perception.element_by_name(&s.perception, &root, name, limits)
+	if perr != .None {
+		return .Element_Not_Found
+	}
+	defer uia.release_element(&el)
+
+	switch method {
+	case .Uia:
+		return map_uia_error(uia.invoke(&el))
+	case .SendInput:
+		return click_rect_center(hwnd, &el)
+	case .Auto:
+		if e := uia.invoke(&el); e == .None {
+			return .None
+		} else if e != .Pattern_Not_Available {
+			return map_uia_error(e)
+		}
+		return click_rect_center(hwnd, &el)
+	}
+	return .None
 }
 
 // click_index clicks the element at the given index. The method selects

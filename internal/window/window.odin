@@ -149,7 +149,8 @@ rect :: proc(hwnd: windows.HWND) -> (Rect, bool) {
 }
 
 // force_foreground brings a window to the foreground even from a background
-// process, beating the foreground lock, then verifies the result.
+// process, beating the foreground lock, then verifies the result. Maximized
+// windows keep their geometry; only minimized windows are restored.
 force_foreground :: proc(hwnd: windows.HWND) -> bool {
 	foreground := windows.GetForegroundWindow()
 	if foreground == hwnd {
@@ -159,7 +160,9 @@ force_foreground :: proc(hwnd: windows.HWND) -> bool {
 	foreground_thread := windows.GetWindowThreadProcessId(foreground, nil)
 	my_thread := windows.GetCurrentThreadId()
 	if win32.AttachThreadInput(foreground_thread, my_thread, true) {
-		windows.ShowWindow(hwnd, win32.SW_RESTORE)
+		if bool(windows.IsIconic(hwnd)) {
+			windows.ShowWindow(hwnd, win32.SW_RESTORE)
+		}
 		windows.SetForegroundWindow(hwnd)
 		win32.AttachThreadInput(foreground_thread, my_thread, false)
 	}

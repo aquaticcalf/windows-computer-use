@@ -45,6 +45,14 @@ test_actions_surface :: proc(t: ^testing.T) {
 		testing.expect(t, name == "invoke me")
 		delete(name)
 	}
+
+	// Clicking by name substring finds the button too.
+	nerr := click_name(&s, button, "invoke", .Uia, limits)
+	testing.expect(t, nerr == .None)
+
+	// A name that matches nothing errors cleanly.
+	merr := click_name(&s, button, "does-not-exist", .Auto, limits)
+	testing.expect(t, merr == .Element_Not_Found)
 }
 
 // create_button makes a Win32 push button; UIA exposes InvokePattern on it.
