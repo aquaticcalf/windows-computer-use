@@ -7,12 +7,21 @@ import "core:sys/windows"
 
 foreign import user32 "system:User32.lib"
 
+foreign import kernel32 "system:Kernel32.lib"
+
 @(default_calling_convention = "system")
 foreign user32 {
 	// Beats the Windows foreground lock so a background window can take input focus.
 	AttachThreadInput :: proc(id_attach, id_attach_to: windows.DWORD, f_attach: windows.BOOL) -> windows.BOOL ---
 	// Shell desktop window (Program Manager); useful as a stable UIA test target.
 	GetShellWindow :: proc() -> windows.HWND ---
+}
+
+@(default_calling_convention = "system")
+foreign kernel32 {
+	// Opens an existing process for querying; used to detect whether a
+	// session's owning process is still alive.
+	OpenProcess :: proc(dw_desired_access: windows.DWORD, b_inherit_handle: windows.BOOL, dw_process_id: windows.DWORD) -> windows.HANDLE ---
 }
 
 // WM_GETOBJECT lParam used to wake Chromium accessibility on a window.

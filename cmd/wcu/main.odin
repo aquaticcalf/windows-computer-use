@@ -4,6 +4,7 @@ import actions "../../internal/actions"
 import capture "../../internal/capture"
 import perception "../../internal/perception"
 import run "../../internal/run"
+import session "../../internal/session"
 import window "../../internal/window"
 import "core:fmt"
 import "core:os"
@@ -50,6 +51,8 @@ main :: proc() {
 		run_wake(args[1:])
 	case "run":
 		run_run(args[1:])
+	case "status":
+		run_status()
 	case "new-desktop":
 		stub("new-desktop")
 	case "move-app":
@@ -626,6 +629,35 @@ run_run :: proc(args: []string) {
 	os.exit(exit_code)
 }
 
+// run_status lists active sessions from the shared registry.
+run_status :: proc() {
+	reg, err := session.open()
+	if err != .None {
+		fmt.eprintln("wcu: failed to read session registry")
+		os.exit(1)
+	}
+	defer session.destroy(&reg)
+
+	sessions := session.active(&reg)
+	defer delete(sessions)
+
+	fmt.println("ID        PID     TARGET     PENDING  PAUSED  STARTED")
+	for s in sessions {
+		fmt.printf(
+			"%-8s %6d  %08x  %6d  %v  %d\n",
+			s.id,
+			s.pid,
+			s.target,
+			s.pending,
+			s.paused,
+			s.started,
+		)
+	}
+	if len(sessions) == 0 {
+		fmt.println("(no active sessions)")
+	}
+}
+
 // show_snapshot renders the state tree of a window so an agent can verify the
 // effect of the action it just performed. Indices are only valid per
 // snapshot, so every action re-renders. Output is capped at a short prefix
@@ -692,6 +724,7 @@ print_help :: proc() {
 	fmt.println("  focus <app>                Bring a window to the foreground")
 	fmt.println("  wake <app>                 Wake Chromium accessibility")
 	fmt.println("  run <command>              Run a shell command (set WCU_ALLOW_RUN=1)")
+	fmt.println("  status                     List active sessions")
 	fmt.println("  screenshot <app>           Capture a window to PNG")
 	fmt.println("  new-desktop <name>         Create a workspace for an agent")
 	fmt.println("  move-app <app> <desktop>   Move an app to a desktop")
