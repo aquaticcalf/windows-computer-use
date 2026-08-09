@@ -36,3 +36,27 @@ test_mouse_button_flags :: proc(t: ^testing.T) {
 	testing.expect(t, down == windows.MOUSEEVENTF_MIDDLEDOWN)
 	testing.expect(t, up == windows.MOUSEEVENTF_MIDDLEUP)
 }
+
+@(test)
+test_wheel_input :: proc(t: ^testing.T) {
+	w := wheel_input(120, false)
+	testing.expect(t, w.type == .MOUSE)
+	testing.expect(t, w.mi.mouseData == 120)
+	testing.expect(t, w.mi.dwFlags == windows.MOUSEEVENTF_WHEEL)
+
+	h := wheel_input(-240, true)
+	delta := i32(-240)
+	testing.expect(t, h.mi.mouseData == u32(delta))
+	testing.expect(t, h.mi.dwFlags == windows.MOUSEEVENTF_HWHEEL)
+}
+
+@(test)
+test_key_down_up_flags :: proc(t: ^testing.T) {
+	// key_down/key_up send input; verify the extended flag is plumbed through
+	// the constructor used by press_combo (key_input with flags).
+	k := key_input(windows.VK_UP, 0, win32.KEYEVENTF_EXTENDEDKEY)
+	testing.expect(t, k.ki.dwFlags == win32.KEYEVENTF_EXTENDEDKEY)
+
+	u := key_input(windows.VK_UP, 0, win32.KEYEVENTF_EXTENDEDKEY | win32.KEYEVENTF_KEYUP)
+	testing.expect(t, u.ki.dwFlags == (win32.KEYEVENTF_EXTENDEDKEY | win32.KEYEVENTF_KEYUP))
+}

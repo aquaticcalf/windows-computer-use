@@ -27,10 +27,13 @@ Error :: enum {
 	Text_Unavailable,
 }
 
-// Scroll_Amount values passed to scroll.
-Scroll_Amount_Large :: binding.Scroll_Amount_Large
-Scroll_Amount_Small :: binding.Scroll_Amount_Small
+// Scroll_Amount values passed to scroll. Decrements scroll up or left;
+// increments scroll down or right. No_Amount leaves an axis alone.
+Scroll_Amount_Large_Decrement :: binding.Scroll_Amount_Large_Decrement
+Scroll_Amount_Small_Decrement :: binding.Scroll_Amount_Small_Decrement
 Scroll_Amount_No_Amount :: binding.Scroll_Amount_No_Amount
+Scroll_Amount_Large_Increment :: binding.Scroll_Amount_Large_Increment
+Scroll_Amount_Small_Increment :: binding.Scroll_Amount_Small_Increment
 
 // Tree_Scope_Element matches only the element itself.
 Tree_Scope_Element :: binding.Tree_Scope_Element
@@ -114,6 +117,14 @@ release_element :: proc(el: ^Element) {
 		binding.release_element(el.ptr)
 		el.ptr = nil
 	}
+}
+
+// retain_element returns a copy of el with an extra reference, so a caller
+// can keep the element alive beyond the walk or scope that found it. Release
+// the returned reference with release_element.
+retain_element :: proc(el: Element) -> Element {
+	binding.element_add_ref(el.ptr)
+	return el
 }
 
 // name returns the element's accessible name. The returned string is

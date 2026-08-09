@@ -517,6 +517,12 @@ release_element :: proc(el: ^IUIAutomationElement) {
 	el->Release()
 }
 
+// element_add_ref increments an element's reference count so the caller can
+// hold it beyond the walk that produced it. Pair with release_element.
+element_add_ref :: proc(el: ^IUIAutomationElement) -> windows.ULONG {
+	return el->AddRef()
+}
+
 // element_find_all collects every element matching the condition in scope.
 element_find_all :: proc(
 	el: ^IUIAutomationElement,
@@ -567,10 +573,13 @@ Selection_Item_Pattern_Id :: 10010
 Toggle_Pattern_Id :: 10015
 Window_Pattern_Id :: 10009
 
-// ScrollAmount values passed to ScrollPattern.Scroll.
-Scroll_Amount_Large :: 0
-Scroll_Amount_Small :: 1
+// ScrollAmount values passed to ScrollPattern.Scroll. Decrements scroll up
+// or left; increments scroll down or right. No_Amount leaves an axis alone.
+Scroll_Amount_Large_Decrement :: 0
+Scroll_Amount_Small_Decrement :: 1
 Scroll_Amount_No_Amount :: 2
+Scroll_Amount_Large_Increment :: 3
+Scroll_Amount_Small_Increment :: 4
 
 // InvokePattern performs the element's default action.
 InvokePattern :: struct {

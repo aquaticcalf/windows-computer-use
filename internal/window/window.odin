@@ -166,6 +166,32 @@ force_foreground :: proc(hwnd: windows.HWND) -> bool {
 	return windows.GetForegroundWindow() == hwnd
 }
 
+// wake sends WM_GETOBJECT (OBJID_CLIENT) to a window and all of its descendant
+// child windows, prompting Chromium-based apps to materialize their UIA tree.
+// It posts messages without waiting so it never blocks on a hung window.
+wake :: proc(hwnd: windows.HWND) -> int {
+	ctx := wake_context {
+		count = 0,
+	}
+	windows.PostMessageW(hwnd, win32.WM_GETOBJECT, 0, win32.OBJID_CLIENT)
+	ctx.count += 1
+	windows.EnumChildWindows(hwnd, wake_cb, windows.LPARAM(uintptr(&ctx)))
+	return ctx.count
+}
+
+// wake_context carries the message counter for wake.
+wake_context :: struct {
+	count: int,
+}
+
+// wake_cb posts WM_GETOBJECT to one child window.
+wake_cb :: proc "system" (child: windows.HWND, lparam: windows.LPARAM) -> windows.BOOL {
+	ctx := (^wake_context)(uintptr(lparam))
+	windows.PostMessageW(child, win32.WM_GETOBJECT, 0, win32.OBJID_CLIENT)
+	ctx.count += 1
+	return windows.BOOL(true)
+}
+
 // collect_context carries the scratch buffer and cursor for the EnumWindows
 // callback. It exists to keep the callback allocation-free.
 collect_context :: struct {

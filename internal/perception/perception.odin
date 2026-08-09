@@ -23,6 +23,8 @@ Error :: enum {
 	Text_Unavailable,
 	// Walk_Failed reports that the accessibility tree could not be walked.
 	Walk_Failed,
+	// Index_Out_Of_Range reports that no element exists at the requested index.
+	Index_Out_Of_Range,
 }
 
 // Limits bounds the cost of a snapshot: node count, tree depth, and per-text
@@ -94,27 +96,30 @@ walk :: proc(
 	if berr != nil {
 		return nil, .Walk_Failed
 	}
-	count := 0
-	walk_node(s, root, 0, limits, &built, &count, allocator)
+	ctx := walk_context {
+		built     = &built,
+		count     = 0,
+		allocator = allocator,
+	}
+	traverse(s, root, 0, limits, walk_visit, &ctx)
 	result = built[:]
 	return result, .None
 }
 
-// walk_node emits one node then recurses into its children and siblings.
-walk_node :: proc(
-	s: ^Session,
-	el: ^uia.Element,
-	depth: int,
-	limits: Limits,
-	built: ^[dynamic]Node,
-	count: ^int,
+// walk_context carries the state walk needs while traversing the tree. It
+// embeds traverse_state so traverse can read the shared node counter.
+walk_context :: struct {
+	using _:   traverse_state,
+	built:     ^[dynamic]Node,
 	allocator: mem.Allocator,
-) {
-	if count^ >= limits.max_nodes || depth > limits.max_depth {
-		return
-	}
+}
 
-	name, _ := uia.name(el, allocator)
+// walk_visit emits one node record for the element being visited and advances
+// the walk's counter.
+walk_visit :: proc(el: ^uia.Element, depth: int, data: rawptr) -> bool {
+	ctx := (^walk_context)(data)
+
+	name, _ := uia.name(el, ctx.allocator)
 	role_id, _ := uia.control_type(el)
 	role := uia.control_type_name(role_id)
 	rect, _ := uia.bounding_rect(el)
@@ -122,13 +127,13 @@ walk_node :: proc(
 
 	value := ""
 	if role == "edit" || role == "combobox" {
-		value, _ = uia.value(el, allocator)
+		value, _ = uia.value(el, ctx.allocator)
 	}
 
 	append(
-		built,
+		ctx.built,
 		Node {
-			index = count^,
+			index = ctx.count,
 			depth = depth,
 			role = role,
 			name = name,
@@ -137,24 +142,107 @@ walk_node :: proc(
 			enabled = enabled,
 		},
 	)
-	count^ += 1
+	ctx.count += 1
+	return true
+}
+
+// visit_fn is called for each element in walk order. Return false to stop the
+// traversal early. data is the caller-supplied context pointer.
+visit_fn :: #type proc(el: ^uia.Element, depth: int, data: rawptr) -> bool
+
+// traverse_state is the shared part of every traversal context: the node
+// counter that limits walk and element_at_index to max_nodes.
+traverse_state :: struct {
+	count: int,
+}
+
+// traverse walks the control-view subtree of el in walk order (node, then its
+// first child's subtree, then each remaining sibling's subtree), calling visit
+// for every element. Shared by walk and element_at_index so both agree on the
+// exact ordering of indices. Returns false only when visit stopped it.
+traverse :: proc(
+	s: ^Session,
+	el: ^uia.Element,
+	depth: int,
+	limits: Limits,
+	visit: visit_fn,
+	data: rawptr,
+) -> bool {
+	state := (^traverse_state)(data)
+	if state.count >= limits.max_nodes || depth > limits.max_depth {
+		return true
+	}
+	if !visit(el, depth, data) {
+		return false
+	}
 
 	child, ok := uia.first_child(&s.auto, el)
 	if !ok {
-		return
+		return true
 	}
 	defer uia.release_element(&child)
-	walk_node(s, &child, depth + 1, limits, built, count, allocator)
+	if !traverse(s, &child, depth + 1, limits, visit, data) {
+		return false
+	}
 
 	// Walk siblings by advancing the reference; each next_sibling returns the
 	// sibling of the element passed to it.
 	sibling, sok := uia.next_sibling(&s.auto, &child)
 	for sok {
-		walk_node(s, &sibling, depth + 1, limits, built, count, allocator)
+		if !traverse(s, &sibling, depth + 1, limits, visit, data) {
+			uia.release_element(&sibling)
+			return false
+		}
 		next, nok := uia.next_sibling(&s.auto, &sibling)
 		uia.release_element(&sibling)
 		sibling, sok = next, nok
 	}
+	return true
+}
+
+// element_at_index returns the element at the given walk index. The returned
+// element carries an extra reference; the caller releases it with
+// uia.release_element. Errors with .Index_Out_Of_Range when no such index
+// exists under the limits.
+element_at_index :: proc(
+	s: ^Session,
+	root: ^uia.Element,
+	index: int,
+	limits: Limits,
+) -> (
+	uia.Element,
+	Error,
+) {
+	ctx := find_context {
+		target = index,
+		count  = 0,
+	}
+	traverse(s, root, 0, limits, find_visit, &ctx)
+	if !ctx.found {
+		return {}, .Index_Out_Of_Range
+	}
+	return ctx.result, .None
+}
+
+// find_context carries the search state for element_at_index. It embeds
+// traverse_state so traverse can read the shared node counter.
+find_context :: struct {
+	using _: traverse_state,
+	target:  int,
+	found:   bool,
+	result:  uia.Element,
+}
+
+// find_visit returns the element whose walk index matches the target.
+find_visit :: proc(el: ^uia.Element, depth: int, data: rawptr) -> bool {
+	ctx := (^find_context)(data)
+	if ctx.count == ctx.target {
+		ctx.result = uia.retain_element(el^)
+		ctx.found = true
+		return false
+	}
+	ctx.count += 1
+	return true
 }
 
 // render converts node records into a compact text tree with indices.
