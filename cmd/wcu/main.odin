@@ -96,6 +96,7 @@ run_state :: proc(args: []string) {
 	app_query := args[0]
 	limits := perception.default_limits()
 	match := ""
+	node_range: perception.Node_Range
 	for i := 1; i < len(args); i += 1 {
 		switch args[i] {
 		case "--max-nodes":
@@ -118,6 +119,11 @@ run_state :: proc(args: []string) {
 				match = args[i + 1]
 				i += 1
 			}
+		case "--nodes":
+			if i + 1 < len(args) {
+				node_range = parse_node_range(args[i + 1])
+				i += 1
+			}
 		}
 	}
 
@@ -134,7 +140,7 @@ run_state :: proc(args: []string) {
 	}
 	defer perception.close(&session)
 
-	text, terr := perception.state(&session, hwnd, limits, match)
+	text, terr := perception.state(&session, hwnd, limits, match, node_range)
 	if terr != .None {
 		fmt.eprintln("wcu: failed to read app state")
 		os.exit(1)
@@ -205,6 +211,24 @@ parse_int :: proc(s: string, fallback: int) -> int {
 		return value
 	}
 	return fallback
+}
+
+// parse_node_range parses "--nodes" values: "500" (a single node) or
+// "500-600" (inclusive range). Returns a zero range on malformed input.
+parse_node_range :: proc(s: string) -> perception.Node_Range {
+	if dash := strings.index_byte(s, '-'); dash >= 0 {
+		start := parse_int(s[:dash], -1)
+		end := parse_int(s[dash + 1:], -1)
+		if start < 0 || end < start {
+			return {}
+		}
+		return perception.Node_Range{start = start, count = end - start + 1}
+	}
+	single := parse_int(s, -1)
+	if single < 0 {
+		return {}
+	}
+	return perception.Node_Range{start = single, count = 1}
 }
 
 // resolve_app resolves an app query (name, pid, or title) to a window handle,
@@ -521,10 +545,12 @@ run_run :: proc(args: []string) {
 	os.exit(exit_code)
 }
 
-// show_snapshot renders the current state tree of a window so an agent can
-// verify the effect of the action it just performed. Indices are only valid
-// per snapshot, so every action re-renders.
-show_snapshot :: proc(hwnd: windows.HWND) {
+// show_snapshot renders the state tree of a window so an agent can verify the
+// effect of the action it just performed. Indices are only valid per
+// snapshot, so every action re-renders. Output is capped at a short prefix
+// (the top of the tree) to keep it readable; pass a non-zero range to see a
+// specific span.
+show_snapshot :: proc(hwnd: windows.HWND, node_range: perception.Node_Range = {}) {
 	session, serr := perception.open()
 	if serr != .None {
 		fmt.eprintln("wcu: failed to open perception session")
@@ -532,7 +558,15 @@ show_snapshot :: proc(hwnd: windows.HWND) {
 	}
 	defer perception.close(&session)
 
-	text, terr := perception.state(&session, hwnd, perception.default_limits())
+	snapshot_range := node_range
+	if snapshot_range.count == 0 {
+		snapshot_range = perception.Node_Range {
+			start = 0,
+			count = 50,
+		}
+	}
+
+	text, terr := perception.state(&session, hwnd, perception.default_limits(), "", snapshot_range)
 	if terr != .None {
 		fmt.eprintln("wcu: failed to read app state")
 		os.exit(1)
@@ -552,7 +586,7 @@ print_help :: proc() {
 	fmt.println()
 	fmt.println("COMMANDS")
 	fmt.println("  list_apps                  List running apps and windows")
-	fmt.println("  state <app> [--match S]    Render an app UI tree as text")
+	fmt.println("  state <app> [--match S] [--nodes N or N-M]  Render an app UI tree as text")
 	fmt.println("  click <app> [--index I | --name N | --x X --y Y] [--method auto|uia|sendinput]")
 	fmt.println("  type <app> <text>          Type text into the target")
 	fmt.println("  key <app> <keys>           Press keys (e.g. ctrl+s)")

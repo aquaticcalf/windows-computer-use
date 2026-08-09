@@ -328,14 +328,23 @@ ascii_lower :: proc(c: byte) -> byte {
 	return c
 }
 
+// Node_Range selects a contiguous span of nodes by index. Zero Start and
+// Count means "all nodes" (indices are 0-based, so 0 alone would be empty).
+Node_Range :: struct {
+	start: int,
+	count: int,
+}
+
 // render converts node records into a compact text tree with indices. When
 // match is non-empty, only nodes whose name, role, or value contains it
 // (case-insensitively) are emitted; parent lines are shown collapsed so the
-// caller still sees the tree shape around a match.
+// caller still sees the tree shape around a match. A non-zero node_range
+// limits output to that span of node indices.
 render :: proc(
 	nodes: []Node,
 	limits: Limits,
 	match: string = "",
+	node_range: Node_Range = {},
 	allocator := context.allocator,
 ) -> (
 	string,
@@ -343,7 +352,15 @@ render :: proc(
 ) {
 	builder := strings.builder_make(allocator)
 	last_shown := -1
+	emitted := 0
 	for n in nodes {
+		in_range :=
+			node_range.count == 0 ||
+			(n.index >= node_range.start && n.index < node_range.start + node_range.count)
+		if !in_range {
+			continue
+		}
+
 		keep :=
 			match == "" ||
 			contains_ci(n.name, match) ||
@@ -353,7 +370,7 @@ render :: proc(
 			continue
 		}
 
-		if match != "" && n.index - last_shown > 1 {
+		if (match != "" || node_range.count != 0) && n.index - last_shown > 1 {
 			strings.write_string(&builder, "...\n")
 		}
 		for _ in 0 ..< n.depth {
@@ -379,18 +396,23 @@ render :: proc(
 		}
 		strings.write_string(&builder, "\n")
 		last_shown = n.index
+		emitted += 1
+	}
+	if node_range.count != 0 && emitted == 0 {
+		strings.write_string(&builder, "(no nodes in range)\n")
 	}
 	return strings.to_string(builder), .None
 }
 
 // state renders the accessibility tree of the window with the given handle.
-// When match is non-empty, only matching nodes are shown. The caller deletes
-// the returned string.
+// When match is non-empty, only matching nodes are shown; node_range limits
+// output to a span of node indices. The caller deletes the returned string.
 state :: proc(
 	s: ^Session,
 	hwnd: windows.HWND,
 	limits: Limits,
 	match: string = "",
+	node_range: Node_Range = {},
 	allocator := context.allocator,
 ) -> (
 	string,
@@ -408,7 +430,7 @@ state :: proc(
 	}
 	defer destroy_nodes(nodes, allocator)
 
-	return render(nodes, limits, match, allocator)
+	return render(nodes, limits, match, node_range, allocator)
 }
 
 // text reads up to max_length characters of text content from the window.

@@ -38,6 +38,19 @@ test_state_and_text_of_shell_window :: proc(t: ^testing.T) {
 	testing.expect(t, !strings.contains(matched, "Program Manager"))
 	delete(matched)
 
+	// The node-range view limits output to the requested span.
+	partial, perr := state(&s, hwnd, limits, "", Node_Range{start = 0, count = 2})
+	testing.expect(t, perr == .None)
+	testing.expect(t, strings.has_prefix(partial, "[0]"))
+	testing.expect(t, !strings.contains(partial, "[2]"))
+	delete(partial)
+
+	// A range beyond the tree reports no nodes.
+	empty, eerr := state(&s, hwnd, limits, "", Node_Range{start = 999, count = 5})
+	testing.expect(t, eerr == .None)
+	testing.expect(t, strings.contains(empty, "no nodes in range"))
+	delete(empty)
+
 	// Text content may not be present on every element; it must not crash.
 	_, terr := perception_text(&s, hwnd)
 	_ = terr
