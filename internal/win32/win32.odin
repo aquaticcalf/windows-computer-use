@@ -30,3 +30,9 @@ SW_RESTORE :: 9
 
 // WM_GETOBJECT message id (also present in window_messages.odin as WM_GETOBJECT).
 WM_GETOBJECT :: 0x003D
+
+// CreateProcess creation flags: do not open a new console window for the child.
+CREATE_NO_WINDOW :: 0x08000000
+
+// STILL_ACTIVE is the exit code reported while a process is still running.
+STILL_ACTIVE :: 259

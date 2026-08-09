@@ -3,6 +3,7 @@ package main
 import actions "../../internal/actions"
 import capture "../../internal/capture"
 import perception "../../internal/perception"
+import run "../../internal/run"
 import window "../../internal/window"
 import "core:fmt"
 import "core:os"
@@ -48,7 +49,7 @@ main :: proc() {
 	case "wake":
 		run_wake(args[1:])
 	case "run":
-		stub("run")
+		run_run(args[1:])
 	case "new-desktop":
 		stub("new-desktop")
 	case "move-app":
@@ -289,7 +290,7 @@ run_click :: proc(args: []string) {
 	if err != .None {
 		action_fail("click failed", err)
 	}
-	fmt.println("ok")
+	show_snapshot(hwnd)
 }
 
 // parse_method maps a --method value to a click method.
@@ -322,7 +323,7 @@ run_type :: proc(args: []string) {
 	if err != .None {
 		action_fail("type failed", err)
 	}
-	fmt.println("ok")
+	show_snapshot(hwnd)
 }
 
 // run_key presses an xdotool-style key spec into the target window.
@@ -339,7 +340,7 @@ run_key :: proc(args: []string) {
 	if err != .None {
 		action_fail("key failed", err)
 	}
-	fmt.println("ok")
+	show_snapshot(hwnd)
 }
 
 // run_scroll scrolls an element in a direction.
@@ -388,7 +389,7 @@ run_scroll :: proc(args: []string) {
 	if err != .None {
 		action_fail("scroll failed", err)
 	}
-	fmt.println("ok")
+	show_snapshot(hwnd)
 }
 
 // parse_direction maps a --dir value to a scroll direction.
@@ -453,7 +454,7 @@ run_set_value :: proc(args: []string) {
 	if err != .None {
 		action_fail("set_value failed", err)
 	}
-	fmt.println("ok")
+	show_snapshot(hwnd)
 }
 
 // run_focus brings a window to the foreground.
@@ -468,7 +469,7 @@ run_focus :: proc(args: []string) {
 	if err != .None {
 		action_fail("focus failed", err)
 	}
-	fmt.println("ok")
+	show_snapshot(hwnd)
 }
 
 // run_wake sends WM_GETOBJECT to a window and its children.
@@ -483,7 +484,63 @@ run_wake :: proc(args: []string) {
 	if err != .None {
 		action_fail("wake failed", err)
 	}
-	fmt.println("ok")
+	show_snapshot(hwnd)
+}
+
+// run_run runs a shell command, capturing stdout and stderr. It is approval-
+// gated: it refuses unless the WCU_ALLOW_RUN environment variable is "1".
+run_run :: proc(args: []string) {
+	if len(args) < 1 {
+		fmt.eprintln("wcu: run requires a command")
+		os.exit(2)
+	}
+
+	if !run.approved() {
+		fmt.eprintln("wcu: run is approval-gated; set WCU_ALLOW_RUN=1 to allow shell execution")
+		os.exit(1)
+	}
+
+	command := strings.join(args, " ")
+	result := run.run_command(command)
+	delete(command)
+
+	if !result.Started {
+		run.destroy(&result)
+		fmt.eprintln("wcu: failed to start command")
+		os.exit(1)
+	}
+
+	fmt.print(result.Stdout)
+	fmt.print(result.Stderr)
+
+	if result.Timed_Out {
+		fmt.eprintln("wcu: command timed out and was terminated")
+	}
+	exit_code := int(result.Exit_Code)
+	run.destroy(&result)
+	os.exit(exit_code)
+}
+
+// show_snapshot renders the current state tree of a window so an agent can
+// verify the effect of the action it just performed. Indices are only valid
+// per snapshot, so every action re-renders.
+show_snapshot :: proc(hwnd: windows.HWND) {
+	session, serr := perception.open()
+	if serr != .None {
+		fmt.eprintln("wcu: failed to open perception session")
+		os.exit(1)
+	}
+	defer perception.close(&session)
+
+	text, terr := perception.state(&session, hwnd, perception.default_limits())
+	if terr != .None {
+		fmt.eprintln("wcu: failed to read app state")
+		os.exit(1)
+	}
+	defer delete(text)
+
+	fmt.println("--- snapshot ---")
+	fmt.print(text)
 }
 
 // print_help writes usage text for every command to stdout.
@@ -503,7 +560,7 @@ print_help :: proc() {
 	fmt.println("  set_value <app> --index I --value <v>")
 	fmt.println("  focus <app>                Bring a window to the foreground")
 	fmt.println("  wake <app>                 Wake Chromium accessibility")
-	fmt.println("  run <command>              Run a shell command (gated)")
+	fmt.println("  run <command>              Run a shell command (set WCU_ALLOW_RUN=1)")
 	fmt.println("  screenshot <app>           Capture a window to PNG")
 	fmt.println("  new-desktop <name>         Create a workspace for an agent")
 	fmt.println("  move-app <app> <desktop>   Move an app to a desktop")
