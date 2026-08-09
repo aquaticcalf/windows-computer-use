@@ -56,12 +56,21 @@ press_key :: proc(vk: u16, extended: bool = false) {
 	key_up(vk, extended)
 }
 
-// type_text sends the text as Unicode keyboard events.
+// type_text sends the text as Unicode keyboard events. Each character is
+// injected as a down/up pair in one SendInput batch. A short pause follows a
+// space: Windows auto-repeat logic misfires if the next key arrives too fast
+// after a space, repeating a phantom key over the rest of the text.
 type_text :: proc(text: string) {
 	for ch in text {
 		unit := u16(ch)
-		send(key_input(0, unit, win32.KEYEVENTF_UNICODE))
-		send(key_input(0, unit, win32.KEYEVENTF_UNICODE | win32.KEYEVENTF_KEYUP))
+		events := [2]windows.INPUT {
+			key_input(0, unit, win32.KEYEVENTF_UNICODE),
+			key_input(0, unit, win32.KEYEVENTF_UNICODE | win32.KEYEVENTF_KEYUP),
+		}
+		send_many(events[:])
+		if ch == ' ' {
+			windows.Sleep(80)
+		}
 	}
 }
 
@@ -85,6 +94,14 @@ wheel_input :: proc(delta: i32, horizontal: bool) -> windows.INPUT {
 send :: proc(input: windows.INPUT) {
 	local := input
 	windows.SendInput(1, &local, size_of(windows.INPUT))
+}
+
+// send_many injects a batch of INPUT events atomically in one SendInput call.
+send_many :: proc(events: []windows.INPUT) {
+	if len(events) == 0 {
+		return
+	}
+	windows.SendInput(u32(len(events)), raw_data(events), size_of(windows.INPUT))
 }
 
 // mouse_button_flags returns the down and up event flags for a button.
