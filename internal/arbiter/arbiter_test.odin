@@ -9,6 +9,20 @@ fake_target :: proc(n: uintptr) -> Target {
 	return Target(n)
 }
 
+// Logged_Frame records one executed frame plus the agent that ran it.
+Logged_Frame :: struct {
+	agent: Agent,
+	frame: Frame,
+}
+
+// record_executor is the fake lane executor for tests: it appends each
+// executed frame to the log behind e.data and always reports success.
+record_executor :: proc(e: Executor, agent: Agent, frame: Frame) -> Error {
+	log := (^[dynamic]Logged_Frame)(e.data)
+	append(log, Logged_Frame{agent = agent, frame = frame})
+	return .None
+}
+
 @(test)
 test_claim_grants_exclusive_ownership :: proc(t: ^testing.T) {
 	a: Arbiter
@@ -112,4 +126,173 @@ test_release_target_drops_single_target :: proc(t: ^testing.T) {
 	testing.expect(t, !owned(&a, agent_a, t1))
 	// Unrelated ownership survives.
 	testing.expect(t, owned(&a, agent_b, t2))
+}
+
+@(test)
+test_two_agents_interleave_without_cross_talk :: proc(t: ^testing.T) {
+	a: Arbiter
+	defer destroy(&a)
+
+	log: [dynamic]Logged_Frame
+	defer delete(log)
+	exec := Executor {
+		data = &log,
+		run  = record_executor,
+	}
+
+	agent_a := Agent("agent-a")
+	agent_b := Agent("agent-b")
+	slack := fake_target(0xa000)
+	notes := fake_target(0xb000)
+
+	// Both agents queue actions on their own windows.
+	testing.expect(
+		t,
+		push(&a, agent_a, Frame{lane = .Uia, target = slack, op = .Type, text = "hello"}) == .None,
+	)
+	testing.expect(
+		t,
+		push(&a, agent_a, Frame{lane = .Uia, target = slack, op = .Key, text = "ctrl+s"}) == .None,
+	)
+	testing.expect(t, push(&a, agent_b, Frame{lane = .Cdp, target = notes, op = .Click}) == .None)
+
+	// B cannot queue anything that targets A's window.
+	testing.expect(
+		t,
+		push(&a, agent_b, Frame{lane = .Uia, target = slack, op = .Click}) == .Target_Owned,
+	)
+
+	// Interleaved execution: each agent only ever runs its own frames.
+	testing.expect(t, execute(&a, exec, agent_a) == .None)
+	testing.expect(t, execute(&a, exec, agent_b) == .None)
+	testing.expect(t, execute(&a, exec, agent_a) == .None)
+	testing.expect(t, execute(&a, exec, agent_a) == .Empty)
+	testing.expect(t, execute(&a, exec, agent_b) == .Empty)
+
+	testing.expect(t, len(log) == 3)
+	// Execution interleaved, but each entry is tagged with its own agent and
+	// its own window, in per-agent push order.
+	testing.expect(t, log[0].agent == agent_a)
+	testing.expect(t, log[0].frame.target == slack)
+	testing.expect(t, log[0].frame.op == .Type)
+	testing.expect(t, log[1].agent == agent_b)
+	testing.expect(t, log[1].frame.target == notes)
+	testing.expect(t, log[1].frame.op == .Click)
+	testing.expect(t, log[2].agent == agent_a)
+	testing.expect(t, log[2].frame.target == slack)
+	testing.expect(t, log[2].frame.op == .Key)
+	// No logged frame touched the other agent's window.
+	for entry in log {
+		testing.expect(t, (entry.agent == agent_a) == (entry.frame.target == slack))
+	}
+}
+
+@(test)
+test_execute_runs_frames_in_push_order :: proc(t: ^testing.T) {
+	a: Arbiter
+	defer destroy(&a)
+
+	log: [dynamic]Logged_Frame
+	defer delete(log)
+	exec := Executor {
+		data = &log,
+		run  = record_executor,
+	}
+
+	agent := Agent("agent")
+	target := fake_target(0xc000)
+
+	ops := [3]Op{.Wake, .Type, .Key}
+	for op in ops {
+		testing.expect(t, push(&a, agent, Frame{lane = .Uia, target = target, op = op}) == .None)
+	}
+
+	for i in 0 ..< len(ops) {
+		testing.expect(t, execute(&a, exec, agent) == .None)
+		testing.expect(t, log[i].frame.op == ops[i])
+	}
+	testing.expect(t, pending(&a, agent) == 0)
+}
+
+@(test)
+test_pause_blocks_execution_until_resume :: proc(t: ^testing.T) {
+	a: Arbiter
+	defer destroy(&a)
+
+	log: [dynamic]Logged_Frame
+	defer delete(log)
+	exec := Executor {
+		data = &log,
+		run  = record_executor,
+	}
+
+	agent := Agent("agent")
+	target := fake_target(0xd000)
+
+	testing.expect(t, push(&a, agent, Frame{lane = .Uia, target = target, op = .Click}) == .None)
+	testing.expect(t, push(&a, agent, Frame{lane = .Uia, target = target, op = .Click}) == .None)
+
+	testing.expect(t, pause(&a, agent) == .None)
+	testing.expect(t, is_paused(&a, agent))
+	testing.expect(t, execute(&a, exec, agent) == .Paused)
+	// Paused execution keeps the queue untouched.
+	testing.expect(t, pending(&a, agent) == 2)
+	testing.expect(t, len(log) == 0)
+
+	testing.expect(t, resume(&a, agent) == .None)
+	testing.expect(t, !is_paused(&a, agent))
+	testing.expect(t, execute(&a, exec, agent) == .None)
+	testing.expect(t, execute(&a, exec, agent) == .None)
+	testing.expect(t, pending(&a, agent) == 0)
+	testing.expect(t, execute(&a, exec, agent) == .Empty)
+
+	// Resuming an unpaused agent is a no-op.
+	testing.expect(t, resume(&a, agent) == .None)
+}
+
+@(test)
+test_pause_resume_require_known_agent :: proc(t: ^testing.T) {
+	a: Arbiter
+	defer destroy(&a)
+
+	testing.expect(t, pause(&a, Agent("ghost")) == .Not_Found)
+	testing.expect(t, resume(&a, Agent("ghost")) == .Not_Found)
+}
+
+@(test)
+test_execute_reports_not_owner_after_release :: proc(t: ^testing.T) {
+	a: Arbiter
+	defer destroy(&a)
+
+	log: [dynamic]Logged_Frame
+	defer delete(log)
+	exec := Executor {
+		data = &log,
+		run  = record_executor,
+	}
+
+	agent := Agent("agent")
+	target := fake_target(0xe000)
+
+	testing.expect(t, push(&a, agent, Frame{lane = .Uia, target = target, op = .Click}) == .None)
+	// The target is released (e.g. the window closed) before it executes.
+	testing.expect(t, release_target(&a, target) == .None)
+
+	testing.expect(t, execute(&a, exec, agent) == .Not_Owner)
+	// The stale frame is consumed, so the queue cannot stall.
+	testing.expect(t, pending(&a, agent) == 0)
+	testing.expect(t, len(log) == 0)
+}
+
+@(test)
+test_execute_on_unknown_agent_is_empty :: proc(t: ^testing.T) {
+	a: Arbiter
+	defer destroy(&a)
+
+	exec := Executor {
+		data = nil,
+		run  = record_executor,
+	}
+	testing.expect(t, execute(&a, exec, Agent("ghost")) == .Empty)
+	testing.expect(t, pending(&a, Agent("ghost")) == 0)
 }
